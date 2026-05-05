@@ -1,9 +1,9 @@
 """
-MAX Channel Poster Bot — API FIX v5.0
-🔥 ИСПРАВЛЕНО: Форматирование передаётся как оригинальный markup
-🔥 ИСПРАВЛЕНО: Кнопки через поле buttons (простой массив)
-🔥 ИСПРАВЛЕНО: Медиа с оригинальным payload
-🔥 ИСПРАВЛЕНО: Превью показывает фото как вложение, а не ссылку
+MAX Channel Poster Bot — FINAL FIX v6.0
+🔥 ИСПРАВЛЕНО: Кнопки как attachment inline_keyboard (из Telegram→MAX бота)
+🔥 ИСПРАВЛЕНО: Форматирование — оригинальный markup
+🔥 ИСПРАВЛЕНО: Медиа — оригинальный payload
+🔥 ИСПРАВЛЕНО: Кнопки с type: "link"
 """
 import asyncio
 import logging
@@ -57,7 +57,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info("=" * 80)
-logger.info(f"🔧 MAX CHANNEL POSTER v5.0 — API FORMAT FIX")
+logger.info(f"🔧 MAX CHANNEL POSTER v6.0 — FINAL FIX")
 logger.info(f"🔧 CHANNEL_ID={CHANNEL_ID}")
 logger.info(f"🔧 BASE_API_URL={BASE_API_URL}")
 logger.info("=" * 80)
@@ -66,14 +66,11 @@ logger.info("=" * 80)
 # 🔧 UTF-16 OFFSET CORRECTION (для markup)
 # ===================================================================
 def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
-    """
-    Корректирует offset'ы из UTF-16 (MAX) в Python-индексы.
-    НЕ меняет структуру markup, ТОЛЬКО корректирует позиции!
-    """
+    """Корректирует offset'ы из UTF-16 (MAX) в Python-индексы."""
     if not markup:
         return []
     
-    logger.info(f"[MARKUP-CORRECT] Correcting {len(markup)} entities")
+    logger.info(f"[MARKUP] Correcting {len(markup)} entities")
     
     corrected = []
     for idx, entity in enumerate(markup):
@@ -81,7 +78,6 @@ def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
         max_offset = entity.get('from', 0)
         max_length = entity.get('length', 0)
         
-        # Конвертируем UTF-16 offset → Python offset
         python_offset = 0
         utf16_pos = 0
         for i, char in enumerate(text):
@@ -92,7 +88,6 @@ def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
         else:
             python_offset = len(text)
         
-        # Конвертируем UTF-16 length → Python length
         python_length = 0
         utf16_pos = max_offset
         for i in range(python_offset, len(text)):
@@ -104,7 +99,7 @@ def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
         entity['from'] = python_offset
         entity['length'] = python_length
         
-        logger.debug(f"[MARKUP-CORRECT] [{idx}] {entity.get('type')}: [{max_offset}:{max_offset+max_length}] → [{python_offset}:{python_offset+python_length}] text='{text[python_offset:python_offset+python_length]}'")
+        logger.debug(f"[MARKUP] [{idx}] {entity.get('type')}: [{max_offset}:{max_offset+max_length}] → [{python_offset}:{python_offset+python_length}]")
         corrected.append(entity)
     
     return corrected
@@ -176,7 +171,7 @@ class AuthManager:
         self.password = new_password
         self.authorized.clear()
         self._save_to_file()
-        logger.info(f"[AUTH] 🔑 Password changed, all sessions cleared")
+        logger.info(f"[AUTH] 🔑 Password changed")
 
 # ===================================================================
 # 🗄 STATE MODULE
@@ -225,7 +220,7 @@ class StateManager:
             logger.info(f"[STATE] 🗑️ Draft cleared for {user_id}")
 
 # ===================================================================
-# 📡 MAX API CLIENT
+# 📡 MAX API CLIENT (ИСПРАВЛЕНО: кнопки как attachment)
 # ===================================================================
 class MAXClient:
     def __init__(self, token: str, base_url: str, timeout: int = 120):
@@ -251,14 +246,14 @@ class MAXClient:
         headers = {
             "Authorization": self.token,
             "Content-Type": "application/json",
-            "User-Agent": "MAX-Channel-Poster/5.0"
+            "User-Agent": "MAX-Channel-Poster/6.0"
         }
         
         url = f"{self.base_url}{endpoint}"
         self.request_count += 1
         
         logger.info(f"[MAX] ▶️ #{self.request_count} {method} {url}")
-        logger.info(f"[MAX] 📤 BODY: {json.dumps(data, ensure_ascii=False)[:600] if data else 'None'}")
+        logger.info(f"[MAX] 📤 BODY: {json.dumps(data, ensure_ascii=False)[:800] if data else 'None'}")
         
         for attempt in range(max_retries):
             try:
@@ -271,7 +266,7 @@ class MAXClient:
                     text = await response.text()
                     
                     logger.info(f"[MAX] ◀️ #{self.request_count}: {response.status} in {elapsed:.2f}s")
-                    logger.info(f"[MAX] 📥 RESPONSE: {text[:600]}")
+                    logger.info(f"[MAX] 📥 RESPONSE: {text[:800]}")
                     
                     if response.status == 200:
                         try:
@@ -303,7 +298,7 @@ class MAXClient:
         
         return {"error": "max_retries_exceeded"}
     
-    # 🔥 ОСНОВНОЙ МЕТОД ОТПРАВКИ
+    # 🔥🔥🔥 ИСПРАВЛЕНО: Кнопки как attachment inline_keyboard!
     async def send_message(self, chat_id: Union[str, int], text: str, 
                           markup: Optional[List[Dict]] = None,
                           buttons: Optional[List[List[Dict]]] = None,
@@ -311,10 +306,9 @@ class MAXClient:
         """
         Отправляет сообщение в MAX.
         
-        🔥 text — чистый текст (без HTML!)
-        🔥 markup — оригинальный массив entities [{type, from, length}]
-        🔥 buttons — массив рядов кнопок [[{text, url}]]
-        🔥 attachments — оригинальные вложения с payload
+        🔥 Кнопки передаются как attachment с type="inline_keyboard"
+        🔥 markup — оригинальный массив entities
+        🔥 attachments — медиа с оригинальным payload
         """
         logger.info(f"[MAX-SEND] ========== SENDING ==========")
         logger.info(f"[MAX-SEND] chat_id={chat_id}")
@@ -325,28 +319,36 @@ class MAXClient:
         
         payload = {"text": text}
         
-        # 🔥 markup как есть (entities)
-        if markup is not None and len(markup) > 0:
+        # markup как entities
+        if markup and len(markup) > 0:
             payload["markup"] = markup
             logger.info(f"[MAX-SEND] Adding markup: {len(markup)} entities")
-            for i, m in enumerate(markup):
-                logger.debug(f"[MAX-SEND]   [{i}] type={m.get('type')}, from={m.get('from')}, length={m.get('length')}")
         
-        # 🔥 buttons — простой массив рядов
-        if buttons is not None and len(buttons) > 0:
-            payload["buttons"] = buttons
-            total_btns = sum(len(row) for row in buttons)
-            logger.info(f"[MAX-SEND] Adding buttons: {len(buttons)} rows, {total_btns} buttons")
+        # 🔥 Формируем все attachments (медиа + кнопки)
+        all_attachments = []
+        
+        # Медиа-вложения
+        if attachments:
+            all_attachments.extend(attachments)
+            logger.info(f"[MAX-SEND] Adding {len(attachments)} media attachments")
+        
+        # 🔥 Кнопки как attachment inline_keyboard
+        if buttons and len(buttons) > 0:
+            keyboard_attachment = {
+                "type": "inline_keyboard",
+                "payload": {
+                    "buttons": buttons
+                }
+            }
+            all_attachments.append(keyboard_attachment)
+            logger.info(f"[MAX-SEND] 🔘 Adding keyboard attachment: {len(buttons)} rows")
             for i, row in enumerate(buttons):
                 for j, btn in enumerate(row):
-                    logger.info(f"[MAX-SEND]   [{i}][{j}]: '{btn.get('text')}' → {btn.get('url', '')[:60]}...")
+                    logger.info(f"[MAX-SEND]   [{i}][{j}]: type={btn.get('type')}, text='{btn.get('text')}', url='{btn.get('url', '')[:60]}...'")
         
-        # 🔥 attachments с оригинальным payload
-        if attachments is not None and len(attachments) > 0:
-            payload["attachments"] = attachments
-            logger.info(f"[MAX-SEND] Adding attachments: {len(attachments)} items")
-            for i, att in enumerate(attachments):
-                logger.info(f"[MAX-SEND]   [{i}] type={att.get('type')}, payload_keys={list(att.get('payload', {}).keys())}")
+        if all_attachments:
+            payload["attachments"] = all_attachments
+            logger.info(f"[MAX-SEND] Total attachments: {len(all_attachments)}")
         
         logger.info(f"[MAX-SEND] Final payload keys: {list(payload.keys())}")
         
@@ -371,7 +373,7 @@ class MAXClient:
         }
         result = await self._request("POST", "/subscriptions", data=body)
         success = "error" not in result
-        logger.info(f"[MAX] Webhook registration: {'✅' if success else '❌'}")
+        logger.info(f"[MAX] Webhook: {'✅' if success else '❌'}")
         return success
 
 # ===================================================================
@@ -384,35 +386,27 @@ class MediaManager:
         logger.info(f"[MEDIA] 🖼 Initialized")
     
     def parse_attachments(self, attachments: List[Dict]) -> List[Dict]:
-        """
-        Парсит вложения из сообщения MAX.
-        🔥 Сохраняет оригинальный payload нетронутым!
-        """
+        """Парсит вложения, сохраняя оригинальный payload."""
         logger.info(f"[MEDIA] 🔍 Parsing {len(attachments)} attachments")
         result = []
         
         for i, att in enumerate(attachments):
             if not isinstance(att, dict):
-                logger.warning(f"[MEDIA] [{i}] Not a dict, skipping")
                 continue
             
             att_type = att.get('type', '')
             payload = att.get('payload', {})
             
-            logger.info(f"[MEDIA] [{i}] type='{att_type}', payload_keys={list(payload.keys())}")
-            
             if att_type in ('image', 'photo', 'video', 'audio', 'voice', 'document', 'file', 'share'):
                 parsed = {
                     'type': att_type,
-                    'payload': payload.copy(),  # 🔥 СОХРАНЯЕМ ОРИГИНАЛЬНЫЙ PAYLOAD
+                    'payload': payload.copy(),
                     'url': payload.get('url') or att.get('url', ''),
                     'filename': payload.get('filename') or att.get('title', f'file_{i}'),
                     'index': i
                 }
                 result.append(parsed)
-                logger.info(f"[MEDIA] [{i}] ✅ Parsed: type={att_type}, url={'present' if parsed['url'] else 'MISSING'}")
-            else:
-                logger.warning(f"[MEDIA] [{i}] ⚠️ Unknown type '{att_type}'")
+                logger.info(f"[MEDIA] [{i}] ✅ type={att_type}, url={'present' if parsed['url'] else 'MISSING'}")
         
         logger.info(f"[MEDIA] ✅ Parsed {len(result)}/{len(attachments)} items")
         return result
@@ -531,10 +525,11 @@ class CommandHandlers:
             self.state.set_step(user_id, 'waiting_password')
             return
         
+        # Кнопки главного меню (тоже с type: link)
         menu_buttons = [
-            [{"text": "➕ Новый пост", "url": "max://new_post"}],
-            [{"text": "📊 Статистика", "url": "max://stats"}],
-            [{"text": "⚙️ Настройки", "url": "max://settings"}]
+            [{"type": "link", "text": "➕ Новый пост", "url": "max://new_post"}],
+            [{"type": "link", "text": "📊 Статистика", "url": "max://stats"}],
+            [{"type": "link", "text": "⚙️ Настройки", "url": "max://settings"}]
         ]
         
         await send_callback(
@@ -577,7 +572,6 @@ class CommandHandlers:
             "Каждая кнопка с новой строки"
         )
     
-    # 🔥 ИСПРАВЛЕНО: Сохраняем оригинальный markup
     async def handle_post_text(self, user_id: int, text: str, markup: List, 
                                raw_attachments: List, send_callback):
         logger.info(f"[CMD-TEXT] ========== RECEIVED TEXT ==========")
@@ -585,13 +579,9 @@ class CommandHandlers:
         logger.info(f"[CMD-TEXT] markup={len(markup)} entities")
         logger.info(f"[CMD-TEXT] attachments={len(raw_attachments)} items")
         
-        if markup:
-            for idx, m in enumerate(markup):
-                logger.info(f"[CMD-TEXT] markup[{idx}]: type={m.get('type')}, from={m.get('from')}, length={m.get('length')}")
-        
         session = self.state.get_session_data(user_id)
         
-        # 🔥 Корректируем offset'ы, но НЕ меняем структуру markup
+        # Корректируем markup offset'ы
         corrected_markup = correct_markup_offsets(text, markup)
         
         session['text'] = text
@@ -613,8 +603,9 @@ class CommandHandlers:
             "Напишите пропустить если не нужны"
         )
     
+    # 🔥 ИСПРАВЛЕНО: Кнопки с type: "link"
     def parse_buttons(self, text: str) -> List[List[Dict]]:
-        """Парсит кнопки: Название | url"""
+        """Парсит кнопки. 🔥 Добавляет type: link как в Telegram→MAX боте!"""
         logger.info(f"[BTN-PARSE] Parsing: '{text[:200]}...'")
         rows = []
         lines = text.strip().split('\n')
@@ -630,7 +621,12 @@ class CommandHandlers:
                     btn_text = parts[0].strip()
                     btn_url = parts[1].strip()
                     if btn_text and btn_url.startswith(('http://', 'https://', 't.me/', 'max://')):
-                        rows.append([{'text': btn_text, 'url': btn_url}])
+                        # 🔥 ДОБАВЛЯЕМ type: "link"!
+                        rows.append([{
+                            "type": "link",
+                            "text": btn_text,
+                            "url": btn_url
+                        }])
                         logger.info(f"[BTN-PARSE] ✅ '{btn_text}' → {btn_url[:60]}...")
                         break
         
@@ -652,12 +648,11 @@ class CommandHandlers:
         self.state.save_draft(user_id, session.copy())
         self.state.set_step(user_id, 'post_ready')
         
-        # 🔥 Отправляем превью
+        # Отправляем превью
         await self.send_preview(user_id, send_callback, session)
     
-    # 🔥 ПРЕДПРОСМОТР
     async def send_preview(self, user_id: int, send_callback, draft: Optional[Dict] = None):
-        """Превью с фото и кнопками"""
+        """Превью с фото и кнопками."""
         logger.info(f"[PREVIEW] ========== SENDING PREVIEW ==========")
         
         if draft is None:
@@ -672,17 +667,14 @@ class CommandHandlers:
         buttons = draft.get('buttons', [])
         attachments = draft.get('attachments', [])
         
-        logger.info(f"[PREVIEW] text='{text[:80]}...', markup={len(markup)}, buttons={len(buttons)}, attachments={len(attachments)}")
-        
         chat_id = self.state.get_session(user_id).get('chat_id', user_id)
         
-        # 🔥 1. Отправляем медиа (фото/видео) как вложения
+        # 1. Отправляем медиа (фото/видео) как вложения
         media_sent = False
         for att in attachments:
             att_type = att.get('type', '')
             
             if att_type in ('image', 'photo') and att.get('payload'):
-                logger.info(f"[PREVIEW] 📸 Sending photo as attachment")
                 caption = text if not media_sent else ""
                 
                 await self.max_client.send_message(
@@ -697,7 +689,7 @@ class CommandHandlers:
                 media_sent = True
                 await asyncio.sleep(0.3)
         
-        # 🔥 2. Если фото не было — отправляем текст
+        # 2. Если фото не было — отправляем текст
         if not media_sent:
             await self.max_client.send_message(
                 chat_id=chat_id,
@@ -705,23 +697,22 @@ class CommandHandlers:
                 markup=markup
             )
         
-        # 🔥 3. Отправляем кнопки поста (если есть)
+        # 3. Отправляем кнопки поста (если есть)
         if buttons:
-            logger.info(f"[PREVIEW] 🔘 Sending {len(buttons)} post buttons")
             await self.max_client.send_message(
                 chat_id=chat_id,
                 text="🔘 Кнопки поста:",
                 buttons=buttons
             )
         
-        # 🔥 4. Кнопки действий
+        # 4. Кнопки действий
         action_buttons = [
             [
-                {"text": "✅ Опубликовать", "url": "max://publish"},
-                {"text": "✏️ Редактировать", "url": "max://edit"}
+                {"type": "link", "text": "✅ Опубликовать", "url": "max://publish"},
+                {"type": "link", "text": "✏️ Редактировать", "url": "max://edit"}
             ],
             [
-                {"text": "❌ Отмена", "url": "max://cancel"}
+                {"type": "link", "text": "❌ Отмена", "url": "max://cancel"}
             ]
         ]
         
@@ -729,6 +720,15 @@ class CommandHandlers:
             chat_id=chat_id,
             text="⚙️ Действия:",
             buttons=action_buttons
+        )
+        
+        # 5. Текстовые команды
+        await send_callback(
+            "Или команды:\n"
+            "/publish — опубликовать\n"
+            "/edit — редактировать\n"
+            "/schedule ГГГГ-ММ-ДД ЧЧ:ММ — отложить\n"
+            "/cancel — отменить"
         )
         
         logger.info(f"[PREVIEW] ========== END PREVIEW ==========")
@@ -753,8 +753,6 @@ class CommandHandlers:
     
     async def handle_edit_text(self, user_id: int, text: str, markup: List, 
                                raw_attachments: List, send_callback):
-        logger.info(f"[CMD-EDIT] Editing text for {user_id}")
-        
         session = self.state.get_session_data(user_id)
         
         corrected_markup = correct_markup_offsets(text, markup)
@@ -773,11 +771,10 @@ class CommandHandlers:
         await send_callback("✅ Текст обновлён!")
         await self.send_preview(user_id, send_callback, session)
     
-    # 🔥 ПУБЛИКАЦИЯ — передаём всё как есть
+    # 🔥 ПУБЛИКАЦИЯ
     async def handle_publish(self, user_id: int, send_callback, 
                             immediate: bool = True, schedule_time: Optional[str] = None):
         logger.info(f"[CMD-PUBLISH] ========== PUBLISHING ==========")
-        logger.info(f"[CMD-PUBLISH] immediate={immediate}")
         
         draft = self.state.get_draft(user_id)
         if draft is None or 'text' not in draft:
@@ -801,7 +798,7 @@ class CommandHandlers:
         
         await send_callback("⏳ Публикую...")
         
-        # 🔥 Формируем attachments с оригинальным payload
+        # Формируем attachments с оригинальным payload
         attachments = []
         for att in draft.get('raw_attachments', []):
             if isinstance(att, dict) and att.get('type'):
@@ -810,7 +807,7 @@ class CommandHandlers:
                     'payload': att.get('payload', {})
                 })
         
-        # 🔥 Отправляем в канал
+        # 🔥 Отправляем в канал (кнопки добавяться автоматически в send_message)
         result = await self.max_client.send_message(
             chat_id=self.channel_id,
             text=draft['text'],
@@ -913,11 +910,9 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers):
     
     logger.info(f"[MSG] 👤 user_id={user_id} | chat_id={chat_id}")
     
-    # Сохраняем chat_id
     session = handlers.state.get_session(user_id)
     session['chat_id'] = chat_id
     
-    # 🔥 send_callback
     async def send_callback(text: str, 
                            markup: Optional[List[Dict]] = None,
                            buttons: Optional[List[List[Dict]]] = None,
@@ -1001,14 +996,14 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers):
 # 🌐 WEB SERVER
 # ===================================================================
 async def health_check(request):
-    return web.json_response({"ok": True, "version": "5.0-api-fix"})
+    return web.json_response({"ok": True, "version": "6.0-final"})
 
 async def root_handler(request):
-    return web.json_response({"bot": "MAX Channel Poster", "version": "5.0"})
+    return web.json_response({"bot": "MAX Channel Poster", "version": "6.0"})
 
 async def on_startup(app):
     logger.info("🚀" * 40)
-    logger.info("🚀 STARTING MAX CHANNEL POSTER v5.0")
+    logger.info("🚀 STARTING MAX CHANNEL POSTER v6.0 — FINAL FIX")
     logger.info("🚀" * 40)
     
     app['auth'] = AuthManager(BOT_PASSWORD, AUTH_FILE)
