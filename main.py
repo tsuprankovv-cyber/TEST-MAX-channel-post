@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import json
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 from aiohttp import web, ClientSession, ClientTimeout
 from dotenv import load_dotenv
@@ -25,10 +25,7 @@ user_sessions: Dict[int, Dict] = {}
 api_session: Optional[ClientSession] = None
 
 
-# ===================================================================
-# API ЗАПРОСЫ
-# ===================================================================
-async def api_request(method: str, endpoint: str, data: Dict = None, max_retries: int = 3):
+async def api_request(method: str, endpoint: str,  Dict = None, max_retries: int = 3):
     headers = {
         "Authorization": BOT_TOKEN,
         "Content-Type": "application/json",
@@ -69,11 +66,7 @@ async def api_request(method: str, endpoint: str, data: Dict = None, max_retries
     return {"error": "max_retries"}
 
 
-# ===================================================================
-# ОТПРАВКА СООБЩЕНИЙ
-# ===================================================================
 async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
-    """Отправка сообщения пользователю"""
     buttons = []
     if keyboard and "inline_keyboard" in keyboard:
         for row in keyboard["inline_keyboard"]:
@@ -90,8 +83,7 @@ async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
     return "error" not in result
 
 
-async def publish_to_channel(post_data: Dict) -> bool:
-    """Публикация поста в канал"""
+async def publish_to_channel(post_ Dict) -> bool:
     try:
         buttons = []
         if post_data.get('button_title') and post_data.get('button_url'):
@@ -107,11 +99,7 @@ async def publish_to_channel(post_data: Dict) -> bool:
         return False
 
 
-# ===================================================================
-# РЕГИСТРАЦИЯ ВЕБХУКА
-# ===================================================================
 async def register_webhook(webhook_url: str) -> bool:
-    """Регистрирует вебхук в MAX API"""
     logger.info(f"[WEBHOOK] Registering: {webhook_url} for chat {CHANNEL_ID}")
     
     body = {
@@ -130,11 +118,7 @@ async def register_webhook(webhook_url: str) -> bool:
         return False
 
 
-# ===================================================================
-# ОБРАБОТКА ВХОДЯЩИХ СООБЩЕНИЙ
-# ===================================================================
 async def webhook_handler(request):
-    """Принимает обновления от MAX API"""
     logger.info(f"[WEBHOOK] 📨 {request.method} from {request.remote}")
     
     if request.method != 'POST':
@@ -160,13 +144,31 @@ async def webhook_handler(request):
 
 async def handle_max_message(msg: Dict):
     """Обработка сообщения от пользователя"""
-    inner = msg
-    body = inner.get('body', {})
-    text = body.get('text', '') or inner.get('text', '')
-    chat_id = inner.get('from', {}).get('id')
+    logger.info(f"[HANDLE] 📦 Message structure: {json.dumps(msg, ensure_ascii=False)[:800]}")
+    
+    chat_id = None
+    
+    if isinstance(msg.get('from'), dict):
+        chat_id = msg['from'].get('id')
+    
+    if not chat_id and isinstance(msg.get('body'), dict):
+        body_from = msg['body'].get('from')
+        if isinstance(body_from, dict):
+            chat_id = body_from.get('id')
+    
+    if not chat_id and isinstance(msg.get('body'), dict):
+        chat_id = msg['body'].get('user_id') or msg['body'].get('chat_id')
     
     if not chat_id:
-        logger.warning("[HANDLE] ❌ No chat_id")
+        chat_id = msg.get('user_id') or msg.get('chat_id')
+    
+    body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
+    text = body.get('text', '') or msg.get('text', '')
+    
+    if not chat_id:
+        logger.warning(f"[HANDLE] ❌ No chat_id found. Available keys: {list(msg.keys())}")
+        if isinstance(msg.get('body'), dict):
+            logger.warning(f"[HANDLE] Body keys: {list(msg['body'].keys())}")
         return
     
     logger.info(f"[HANDLE] 💬 From {chat_id}: {text[:100] if text else '[empty]'}")
@@ -205,9 +207,6 @@ async def handle_max_message(msg: Dict):
             del user_sessions[chat_id]
 
 
-# ===================================================================
-# WEB SERVER
-# ===================================================================
 async def health_check(request):
     return web.json_response({"ok": True, "status": "running"})
 
