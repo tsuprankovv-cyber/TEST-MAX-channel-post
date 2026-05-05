@@ -1,25 +1,21 @@
 """
-MAX Channel Poster Bot — FULL FEATURE VERSION v2.0
+MAX Channel Poster Bot — FULL FEATURE VERSION v2.2
 ✅ Авторизация по паролю (сохранение в файл, до смены пароля)
-✅ Медиа: фото/видео/аудио/голосовые/документы/коллажи (до 10 файлов)
-✅ Форматирование: прозрачная передача markup из MAX
-✅ Кнопки: универсальный парсинг (|, -, →), расположение по рядам
-✅ Предпросмотр: с реальными кнопками + применённым форматированием
+✅ Медиа: фото/видео/аудио/голосовые/документы/коллажи/ссылки (до 10 файлов)
+✅ Форматирование: сохранение markup + конвертация в HTML для предпросмотра
+✅ Кнопки: универсальный парсинг (|, -, →), поддержка рядов (новая строка = новый ряд)
+✅ Предпросмотр: с применённым форматированием и реальными кнопками
 ✅ Отложенная публикация (формат: ГГГГ-ММ-ДД ЧЧ:ММ)
 ✅ Редактирование постов
 ✅ Статистика: просмотры, клики (с логированием)
 ✅ Сервисное меню: /set_channel, /set_password, /list_admins
-✅ Inline-кнопки меню (max:// или url)
+✅ Inline-меню (max:// ссылки)
 ✅ Очистка временных файлов
 ✅ 🔥🔥🔥 МАКСИМАЛЬНОЕ ЛОГИРОВАНИЕ НА КАЖДОМ ШАГЕ 🔥🔥🔥
-🔧 FIX: chat_id из recipient для отправки ответов
-🔧 FIX: webhook только с message_created
-🔧 FIX: только кнопки с url (MAX не поддерживает callback_data)
-🔧 FIX: навигация через inline-кнопки + текстовые команды
-🔧 FIX: все синтаксические ошибки исправлены (if data is not None)
-🔧 FIX: сохранение и передача attachments (все типы медиа)
-🔧 FIX: применение markup в предпросмотре (HTML конвертация)
-🔧 FIX: очистка сессии после /publish
+🔧 FIX: Унифицирована передача кнопок (inline_keyboard → плоский список)
+🔧 FIX: Исправлены все синтаксические ошибки (if data is not None)
+🔧 FIX: Сохранение сессии и очистка после публикации
+🔧 FIX: Корректная обработка attachments и markup
 """
 import asyncio
 import logging
@@ -82,6 +78,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info(f"🔧 LOG_LEVEL={LOG_LEVEL}, LOG_FILE={log_file}")
 logger.info(f"🔧 Config: CHANNEL_ID={CHANNEL_ID}, MEDIA_CACHE={MEDIA_CACHE_DIR}")
+logger.info(f"🔧 MAX_MEDIA_ITEMS={MAX_MEDIA_ITEMS}, API_TIMEOUT={API_TIMEOUT}s")
 
 # ===================================================================
 # 🔐 AUTH MODULE
@@ -99,6 +96,7 @@ class AuthManager:
     
     def _load_from_file(self):
         """Загружает авторизованных пользователей из файла"""
+        logger.debug(f"[AUTH] 📥 Loading from {self.auth_file}")
         if self.auth_file.exists():
             try:
                 with open(self.auth_file, 'r', encoding='utf-8') as f:
@@ -106,8 +104,11 @@ class AuthManager:
                     self.authorized = {int(k): v for k, v in data.get('users', {}).items()}
                     self.failed_attempts = {int(k): v for k, v in data.get('failed', {}).items()}
                 logger.info(f"[AUTH] 📥 Loaded {len(self.authorized)} authorized users from {self.auth_file}")
+                logger.debug(f"[AUTH] Users: {list(self.authorized.keys())}")
             except Exception as e:
                 logger.error(f"[AUTH] ❌ Failed to load auth file: {e}")
+        else:
+            logger.info(f"[AUTH] 📄 Auth file not found: {self.auth_file}")
     
     def _save_to_file(self):
         """Сохраняет состояние в файл"""
@@ -198,7 +199,7 @@ class StateManager:
             logger.debug(f"[STATE] 🆕 Created session for user {user_id}")
         return self.sessions[user_id]
     
-    def set_step(self, user_id: int, step: str, data: Dict = None):
+    def set_step(self, user_id: int, step: str,  Dict = None):
         """Устанавливает шаг в сессии"""
         session = self.get_session(user_id)
         session['step'] = step
@@ -270,7 +271,7 @@ class MAXClient:
             await self.session.close()
             logger.info("[MAX] 🔌 HTTP session closed")
     
-    async def _request(self, method: str, endpoint: str, data: Dict = None, 
+    async def _request(self, method: str, endpoint: str,  Dict = None, 
                        params: Dict = None, files: Dict = None, 
                        max_retries: int = 3) -> Dict:
         """Универсальный запрос с логированием и повторами"""
@@ -384,7 +385,7 @@ class MAXClient:
         
         # 🔥 Только кнопки с url поддерживаются в MAX!
         if buttons is not None:
-            valid_buttons = [b for b in buttons if b.get('url')]
+            valid_buttons = [b for b in buttons if isinstance(b, dict) and b.get('url')]
             if valid_buttons:
                 payload["buttons"] = valid_buttons
                 logger.debug(f"[MAX] Buttons (url-only): {valid_buttons}")
@@ -411,7 +412,7 @@ class MAXClient:
         if text is not None:
             payload["text"] = text
         if buttons is not None:
-            valid_buttons = [b for b in buttons if b.get('url')]
+            valid_buttons = [b for b in buttons if isinstance(b, dict) and b.get('url')]
             if valid_buttons:
                 payload["buttons"] = valid_buttons
         if markup is not None:
@@ -442,7 +443,7 @@ class MAXClient:
         logger.info(f"[MAX] {'✅' if success else '❌'} Webhook registration: {result}")
         return success
     
-    async def upload_media(self, file_data: bytes, filename: str, 
+    async def upload_media(self, file_ bytes, filename: str, 
                           media_type: str = 'photo') -> Dict:
         """Загружает медиафайл и возвращает данные для attachments"""
         logger.info(f"[MAX] 📤 upload_media(filename={filename}, type={media_type}, size={len(file_data)}B)")
@@ -473,7 +474,7 @@ class MediaManager:
         self.media_cache: Dict[str, Dict] = {}
         logger.info(f"[MEDIA] 🖼 MediaManager initialized | cache_dir={cache_dir} | max_items={max_items}")
     
-    def _generate_hash(self, file_data: bytes) -> str:
+    def _generate_hash(self, file_ bytes) -> str:
         """Генерирует хэш файла"""
         return hashlib.sha256(file_data).hexdigest()[:16]
     
@@ -771,7 +772,7 @@ class PublishScheduler:
                 continue
         return None
     
-    def schedule_post(self, user_id: int, post_data: Dict, publish_at: str) -> Optional[str]:
+    def schedule_post(self, user_id: int, post_ Dict, publish_at: str) -> Optional[str]:
         """Планирует публикацию поста"""
         logger.info(f"[SCHEDULER] 📅 schedule_post(user_id={user_id}, publish_at={publish_at})")
         
@@ -1155,7 +1156,6 @@ class CommandHandlers:
             
             # 🔥 Обрабатываем вложения: скачиваем и готовим для публикации
             published_attachments = []
-            media_mgr = MediaManager(MEDIA_CACHE_DIR, MAX_MEDIA_ITEMS)
             
             for att in draft.get('attachments', []):
                 if att.get('type') == 'share':
@@ -1165,7 +1165,7 @@ class CommandHandlers:
                     # Медиа скачиваем и кэшируем
                     url = att.get('url')
                     if url:
-                        cached = await media_mgr.download_and_cache(url, att.get('filename'))
+                        cached = await self.media_mgr.download_and_cache(url, att.get('filename'))
                         if cached:
                             # Для публикации передаём token или загружаем заново
                             if att.get('token'):
@@ -1180,8 +1180,8 @@ class CommandHandlers:
                                 })
                             else:
                                 # Загружаем заново через API
-                                file_data = media_mgr.get_cached_file(cached['hash'])
-                                if file_data:
+                                file_data = self.media_mgr.get_cached_file(cached['hash'])
+                                if file_
                                     upload_result = await self.max_client.upload_media(
                                         file_data, cached['filename'], cached['type']
                                     )
@@ -1356,8 +1356,20 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
     
     logger.info(f"[MSG] 👤 user_id={user_id} | reply_chat_id={chat_id_for_reply}")
     
-    # 🔧 Создаём колбэк для отправки ответа
-    async def send_callback(text: str, buttons: List[Dict] = None):
+    # 🔧 Создаём колбэк для отправки ответа — ИСПРАВЛЕНО
+    async def send_callback(text: str, keyboard: Dict = None):
+        # 🔧 Извлекаем кнопки из keyboard или используем buttons напрямую
+        buttons = None
+        if keyboard is not None:
+            if isinstance(keyboard, dict) and 'inline_keyboard' in keyboard:
+                # Преобразуем inline_keyboard в плоский список
+                buttons = [btn for row in keyboard['inline_keyboard'] for btn in row]
+                logger.debug(f"[SEND] Converted inline_keyboard to {len(buttons)} buttons")
+            elif isinstance(keyboard, list):
+                buttons = keyboard
+            else:
+                buttons = keyboard
+        
         logger.info(f"[SEND] 📤 Sending to chat_id={chat_id_for_reply}: text_len={len(text)}, buttons={len(buttons) if buttons else 0}")
         result = await handlers.max_client.send_message(
             chat_id=chat_id_for_reply,
@@ -1423,7 +1435,7 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
 # 🌐 WEB SERVER
 # ===================================================================
 async def health_check(request):
-    return web.json_response({"ok": True, "status": "running", "version": "2.0.0-full"})
+    return web.json_response({"ok": True, "status": "running", "version": "2.2.0-full"})
 
 async def root_handler(request):
     return web.json_response({
@@ -1435,7 +1447,7 @@ async def root_handler(request):
 
 async def on_startup(app):
     logger.info("🚀" * 40)
-    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT — FULL FEATURE v2.0")
+    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT — FULL FEATURE v2.2")
     logger.info("🚀" * 40)
     
     # Инициализируем компоненты
