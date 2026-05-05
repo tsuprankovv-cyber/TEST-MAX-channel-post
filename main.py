@@ -192,11 +192,11 @@ class StateManager:
             logger.debug(f"[STATE] 🆕 Created session for user {user_id}")
         return self.sessions[user_id]
     
-    def set_step(self, user_id: int, step: str,  Dict = None):
+    def set_step(self, user_id: int, step: str, data: Dict = None):
         """Устанавливает шаг в сессии"""
         session = self.get_session(user_id)
         session['step'] = step
-        if 
+        if data is not None:
             session['data'].update(data)
         logger.info(f"[STATE] 📍 User {user_id} → step={step} | data_keys={list(session['data'].keys()) if session['data'] else 'empty'}")
     
@@ -264,7 +264,7 @@ class MAXClient:
             await self.session.close()
             logger.info("[MAX] 🔌 HTTP session closed")
     
-    async def _request(self, method: str, endpoint: str,  Dict = None, 
+    async def _request(self, method: str, endpoint: str, data: Dict = None, 
                        params: Dict = None, files: Dict = None, 
                        max_retries: int = 3) -> Dict:
         """Универсальный запрос с логированием и повторами"""
@@ -276,7 +276,7 @@ class MAXClient:
             "User-Agent": "MAX-Channel-Poster/1.0"
         }
         
-        if files:
+        if files is not None:
             headers.pop("Content-Type", None)
         
         url = f"{self.base_url}{endpoint}"
@@ -285,22 +285,22 @@ class MAXClient:
         logger.info(f"[MAX] ▶️ #{self.request_count} {method} {url}")
         logger.debug(f"[MAX] Headers: { {k: ('***' if 'Auth' in k else v) for k, v in headers.items()} }")
         
-        # 🔧 FIX: проверка if 
-        if 
+        # 🔧 FIX: проверка if data is not None
+        if data is not None:
             logger.debug(f"[MAX] Body: {json.dumps(data, ensure_ascii=False)[:500]}")
-        if params:
+        if params is not None:
             logger.debug(f"[MAX] Params: {params}")
-        if files:
+        if files is not None:
             logger.debug(f"[MAX] Files: {list(files.keys())}")
         
         start_time = time.time()
         
         for attempt in range(max_retries):
             try:
-                if files:
+                if files is not None:
                     form = FormData()
-                    # 🔧 FIX: проверка if 
-                    if 
+                    # 🔧 FIX: проверка if data is not None
+                    if data is not None:
                         for key, value in data.items():
                             form.add_field(key, json.dumps(value) if isinstance(value, (dict, list)) else str(value))
                     for key, file_data in files.items():
@@ -377,7 +377,7 @@ class MAXClient:
         payload = {"text": text}
         
         # 🔥 Только кнопки с url поддерживаются в MAX!
-        if buttons:
+        if buttons is not None:
             valid_buttons = [b for b in buttons if b.get('url')]
             if valid_buttons:
                 payload["buttons"] = valid_buttons
@@ -385,11 +385,11 @@ class MAXClient:
             else:
                 logger.debug(f"[MAX] No valid url buttons, skipping")
         
-        if markup:
+        if markup is not None:
             payload["markup"] = markup
             logger.debug(f"[MAX] Markup: {len(markup)} entities")
         
-        if attachments:
+        if attachments is not None:
             payload["attachments"] = attachments
             logger.debug(f"[MAX] Attachments: {len(attachments)} items")
         
@@ -434,7 +434,7 @@ class MAXClient:
         logger.info(f"[MAX] {'✅' if success else '❌'} Webhook registration: {result}")
         return success
     
-    async def upload_media(self, file_ bytes, filename: str, 
+    async def upload_media(self, file_data: bytes, filename: str, 
                           media_type: str = 'photo') -> Dict:
         """Загружает медиафайл и возвращает ID"""
         logger.info(f"[MAX] 📤 upload_media(filename={filename}, type={media_type}, size={len(file_data)}B)")
@@ -465,9 +465,9 @@ class MediaManager:
         self.media_cache: Dict[str, Dict] = {}
         logger.info(f"[MEDIA] 🖼 MediaManager initialized | cache_dir={cache_dir} | max_items={max_items}")
     
-    def _generate_hash(self,  bytes) -> str:
+    def _generate_hash(self, file_data: bytes) -> str:
         """Генерирует хэш файла"""
-        return hashlib.sha256(data).hexdigest()[:16]
+        return hashlib.sha256(file_data).hexdigest()[:16]
     
     async def download_and_cache(self, url: str, filename: str = None) -> Optional[Dict]:
         """Скачивает файл по URL и кэширует его"""
@@ -480,26 +480,26 @@ class MediaManager:
                         logger.error(f"[MEDIA] ❌ HTTP {response.status} downloading {url}")
                         return None
                     
-                    data = await response.read()
-                    file_hash = self._generate_hash(data)
+                    file_data = await response.read()
+                    file_hash = self._generate_hash(file_data)
                     
                     content_type = response.headers.get('Content-Type', '')
                     media_type = 'photo' if 'image' in content_type else 'video' if 'video' in content_type else 'document'
                     
                     cache_path = self.cache_dir / f"{file_hash}.bin"
-                    cache_path.write_bytes(data)
+                    cache_path.write_bytes(file_data)
                     
                     metadata = {
                         'hash': file_hash,
                         'filename': filename or f"file_{file_hash}",
-                        'size': len(data),
+                        'size': len(file_data),
                         'type': media_type,
                         'cached_at': datetime.now().isoformat(),
                         'cache_path': str(cache_path)
                     }
                     
                     self.media_cache[file_hash] = metadata
-                    logger.info(f"[MEDIA] ✅ Cached {filename} | hash={file_hash} | size={len(data)/1024:.1f}KB | type={media_type}")
+                    logger.info(f"[MEDIA] ✅ Cached {filename} | hash={file_hash} | size={len(file_data)/1024:.1f}KB | type={media_type}")
                     
                     return metadata
                     
@@ -602,12 +602,12 @@ class PublishScheduler:
                 continue
         return None
     
-    def schedule_post(self, user_id: int, post_ Dict, publish_at: str) -> Optional[str]:
+    def schedule_post(self, user_id: int, post_data: Dict, publish_at: str) -> Optional[str]:
         """Планирует публикацию поста"""
         logger.info(f"[SCHEDULER] 📅 schedule_post(user_id={user_id}, publish_at={publish_at})")
         
         publish_time = self.parse_datetime(publish_at)
-        if not publish_time:
+        if publish_time is None:
             logger.error(f"[SCHEDULER] ❌ Invalid datetime format: {publish_at}")
             return None
         
@@ -732,7 +732,7 @@ class StatsCollector:
             self.stats[message_id]['views'] = views
             now = datetime.now().isoformat()
             if views > old_views:
-                if not self.stats[message_id]['first_view_at']:
+                if self.stats[message_id]['first_view_at'] is None:
                     self.stats[message_id]['first_view_at'] = now
                 self.stats[message_id]['last_view_at'] = now
             self._save_to_file()
@@ -750,7 +750,7 @@ class StatsCollector:
     
     def get_stats(self, message_id: str = None) -> Union[Dict, List[Dict]]:
         """Возвращает статистику"""
-        if message_id:
+        if message_id is not None:
             result = self.stats.get(message_id, {}).copy()
             if message_id in self.clicks:
                 result['button_clicks'] = self.clicks[message_id]
@@ -837,8 +837,6 @@ class CommandHandlers:
             await send_callback("🔐 Введите пароль для доступа к боту:")
             self.state.set_step(user_id, 'waiting_password')
             return
-        
-        keyboard_preview = "👁 **Предпросмотр** — покажет как будет выглядеть пост (с кнопками)\n"
         
         await send_callback(
             "👋 **MAX Channel Poster**\n\n"
@@ -954,7 +952,7 @@ class CommandHandlers:
         logger.info(f"[CMD] 👁 handle_preview(user_id={user_id})")
         
         draft = self.state.get_draft(user_id)
-        if not draft or 'text' not in draft:
+        if draft is None or 'text' not in draft:
             await send_callback("❌ Черновик не найден. Создайте пост через /post")
             return
         
@@ -977,7 +975,7 @@ class CommandHandlers:
         logger.info(f"[CMD] 🚀 handle_publish(user_id={user_id}, immediate={immediate})")
         
         draft = self.state.get_draft(user_id)
-        if not draft or 'text' not in draft:
+        if draft is None or 'text' not in draft:
             await send_callback("❌ Черновик не найден")
             return
         
@@ -994,7 +992,7 @@ class CommandHandlers:
             
             if "error" not in result:
                 message_id = result.get('message', {}).get('mid')
-                if message_id:
+                if message_id is not None:
                     self.stats.record_message(message_id, self.channel_id, draft['text'], datetime.now().isoformat())
                 
                 self.state.clear_draft(user_id)
@@ -1019,13 +1017,13 @@ class CommandHandlers:
         logger.info(f"[CMD] ⏰ handle_schedule_time(user_id={user_id}, time={time_str})")
         
         draft = self.state.get_draft(user_id)
-        if not draft or 'text' not in draft:
+        if draft is None or 'text' not in draft:
             await send_callback("❌ Черновик не найден")
             return
         
         job_id = self.scheduler.schedule_post(user_id, draft, time_str)
         
-        if job_id:
+        if job_id is not None:
             self.state.clear_draft(user_id)
             await send_callback(f"✅ **Пост запланирован** на {time_str}\n\nID задания: `{job_id}`")
             logger.info(f"[CMD] ✅ Post scheduled: job_id={job_id}")
@@ -1070,7 +1068,6 @@ class CommandHandlers:
     async def handle_set_channel(self, user_id: int, new_channel_id: str, send_callback):
         """Смена канала публикации"""
         logger.info(f"[CMD] 📢 handle_set_channel(user_id={user_id}, new_channel={new_channel_id})")
-        # В реальном коде здесь нужно обновить CHANNEL_ID в конфиге
         await send_callback(f"✅ Канал изменён на: `{new_channel_id}`\n\n⚠️ Для применения перезапустите бота или обновите переменную MAX_CHANNEL_ID")
     
     async def handle_set_password(self, user_id: int, new_password: str, send_callback):
@@ -1146,7 +1143,7 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
     # 🔧 FIX: используем chat_id из recipient для отправки ответов!
     chat_id_for_reply = recipient.get('chat_id') or recipient.get('user_id') or user_id
     
-    if not user_id:
+    if user_id is None:
         logger.error(f"[MSG] ❌ Could not extract user_id from recipient: {recipient}")
         return
     
