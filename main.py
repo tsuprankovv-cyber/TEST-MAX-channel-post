@@ -1,5 +1,5 @@
 """
-MAX Channel Poster Bot — FINAL VERSION WITH MAX LOGGING
+MAX Channel Poster Bot — FINAL CORRECTED VERSION
 ✅ Авторизация по паролю (из env, с повторным запросом при смене)
 ✅ Медиа: фото/видео/коллаж (до 10 файлов)
 ✅ Форматирование: прозрачная передача markup из MAX
@@ -11,6 +11,8 @@ MAX Channel Poster Bot — FINAL VERSION WITH MAX LOGGING
 ✅ Сервисное меню: /set_channel, /set_password, /list_admins
 ✅ Очистка временных файлов
 ✅ 🔥🔥🔥 МАКСИМАЛЬНОЕ ЛОГИРОВАНИЕ НА КАЖДОМ ШАГЕ 🔥🔥🔥
+🔧 FIX: использует chat_id из recipient для отправки ответов
+🔧 FIX: регистрирует вебхук только с message_created
 """
 import asyncio
 import logging
@@ -80,13 +82,12 @@ class AuthManager:
     def __init__(self, password: str, auth_file: Path):
         self.password = password
         self.auth_file = auth_file
-        self.authorized: Dict[int, Dict] = {}  # user_id -> {auth_time, password_hash}
-        self.failed_attempts: Dict[int, int] = {}  # user_id -> count
+        self.authorized: Dict[int, Dict] = {}
+        self.failed_attempts: Dict[int, int] = {}
         self._load_from_file()
         logger.info(f"[AUTH] 🔐 AuthManager initialized | password_hash={hashlib.sha256(password.encode()).hexdigest()[:8]}...")
     
     def _load_from_file(self):
-        """Загружает авторизованных пользователей из файла"""
         if self.auth_file.exists():
             try:
                 with open(self.auth_file, 'r', encoding='utf-8') as f:
@@ -98,7 +99,6 @@ class AuthManager:
                 logger.error(f"[AUTH] ❌ Failed to load auth file: {e}")
     
     def _save_to_file(self):
-        """Сохраняет состояние в файл (эфемерно на Render, но полезно)"""
         try:
             data = {
                 'users': {str(k): v for k, v in self.authorized.items()},
@@ -112,10 +112,7 @@ class AuthManager:
             logger.warning(f"[AUTH] ⚠️ Failed to save auth file: {e}")
     
     def check_password(self, user_id: int, password: str) -> bool:
-        """Проверяет пароль пользователя"""
         logger.info(f"[AUTH] 🔍 check_password(user_id={user_id}, password={'*' * len(password)})")
-        
-        # Если пароль совпадает с текущим — авторизуем
         if password == self.password:
             self.authorized[user_id] = {
                 'auth_time': datetime.now().isoformat(),
@@ -125,8 +122,6 @@ class AuthManager:
             self._save_to_file()
             logger.info(f"[AUTH] ✅ User {user_id} authorized successfully")
             return True
-        
-        # Неверный пароль
         self.failed_attempts[user_id] = self.failed_attempts.get(user_id, 0) + 1
         attempts = self.failed_attempts[user_id]
         logger.warning(f"[AUTH] ❌ User {user_id} failed attempt #{attempts}")
@@ -134,10 +129,8 @@ class AuthManager:
         return False
     
     def is_authorized(self, user_id: int) -> bool:
-        """Проверяет, авторизован ли пользователь"""
         if user_id in self.authorized:
             auth_data = self.authorized[user_id]
-            # Проверяем, не сменился ли пароль
             if auth_data.get('password_hash') == hashlib.sha256(self.password.encode()).hexdigest():
                 logger.debug(f"[AUTH] ✅ User {user_id} is authorized")
                 return True
@@ -147,18 +140,15 @@ class AuthManager:
         return False
     
     def get_failed_attempts(self, user_id: int) -> int:
-        """Возвращает количество неудачных попыток"""
         return self.failed_attempts.get(user_id, 0)
     
     def reset_failed_attempts(self, user_id: int):
-        """Сбрасывает счётчик неудачных попыток"""
         if user_id in self.failed_attempts:
             del self.failed_attempts[user_id]
             self._save_to_file()
             logger.info(f"[AUTH] 🔄 Reset failed attempts for user {user_id}")
     
     def list_authorized(self) -> List[Dict]:
-        """Возвращает список авторизованных пользователей"""
         return [
             {'user_id': uid, 'auth_time': data['auth_time']}
             for uid, data in self.authorized.items()
@@ -166,25 +156,23 @@ class AuthManager:
 
 
 # ===================================================================
-# 🗄 STATE MODULE (сессии, черновики)
+# 🗄 STATE MODULE
 # ===================================================================
 class StateManager:
     """Управление сессиями пользователей и черновиками"""
     
     def __init__(self):
-        self.sessions: Dict[int, Dict] = {}  # user_id -> session_data
-        self.drafts: Dict[int, Dict] = {}  # user_id -> draft_post
+        self.sessions: Dict[int, Dict] = {}
+        self.drafts: Dict[int, Dict] = {}
         logger.info("[STATE] 🗄 StateManager initialized")
     
     def get_session(self, user_id: int) -> Dict:
-        """Получает или создаёт сессию пользователя"""
         if user_id not in self.sessions:
             self.sessions[user_id] = {'step': None, 'data': {}}
             logger.debug(f"[STATE] 🆕 Created session for user {user_id}")
         return self.sessions[user_id]
     
-    def set_step(self, user_id: int, step: str, data: Dict = None):
-        """Устанавливает шаг в сессии"""
+    def set_step(self, user_id: int, step: str,  Dict = None):
         session = self.get_session(user_id)
         session['step'] = step
         if data:
@@ -192,38 +180,32 @@ class StateManager:
         logger.info(f"[STATE] 📍 User {user_id} → step={step} | data_keys={list(session['data'].keys()) if session['data'] else 'empty'}")
     
     def get_step(self, user_id: int) -> Optional[str]:
-        """Возвращает текущий шаг пользователя"""
         return self.sessions.get(user_id, {}).get('step')
     
     def get_session_data(self, user_id: int) -> Dict:
-        """Возвращает данные сессии"""
         return self.sessions.get(user_id, {}).get('data', {})
     
     def clear_session(self, user_id: int):
-        """Очищает сессию пользователя"""
         if user_id in self.sessions:
             logger.info(f"[STATE] 🧹 Cleared session for user {user_id}")
             del self.sessions[user_id]
     
     def save_draft(self, user_id: int, draft: Dict):
-        """Сохраняет черновик поста"""
         draft['saved_at'] = datetime.now().isoformat()
         self.drafts[user_id] = draft
         logger.info(f"[STATE] 💾 Draft saved for user {user_id} | keys={list(draft.keys())}")
     
     def get_draft(self, user_id: int) -> Optional[Dict]:
-        """Получает черновик пользователя"""
         return self.drafts.get(user_id)
     
     def clear_draft(self, user_id: int):
-        """Удаляет черновик"""
         if user_id in self.drafts:
             logger.info(f"[STATE] 🗑️ Draft cleared for user {user_id}")
             del self.drafts[user_id]
 
 
 # ===================================================================
-# 📡 MAX API CLIENT (с максимальным логированием)
+# 📡 MAX API CLIENT
 # ===================================================================
 class MAXClient:
     """Обёртка над MAX API с детальным логированием"""
@@ -238,21 +220,18 @@ class MAXClient:
         logger.info(f"[MAX] 📡 MAXClient initialized | base_url={base_url} | timeout={timeout}s")
     
     async def init(self):
-        """Инициализирует HTTP-сессию"""
         if not self.session:
             self.session = ClientSession(timeout=self.timeout)
             logger.info("[MAX] 🔗 HTTP session created")
     
     async def close(self):
-        """Закрывает сессию"""
         if self.session:
             await self.session.close()
             logger.info("[MAX] 🔌 HTTP session closed")
     
-    async def _request(self, method: str, endpoint: str, data: Dict = None, 
+    async def _request(self, method: str, endpoint: str,  Dict = None, 
                        params: Dict = None, files: Dict = None, 
                        max_retries: int = 3) -> Dict:
-        """Универсальный запрос с логированием и повторами"""
         await self.init()
         
         headers = {
@@ -261,7 +240,6 @@ class MAXClient:
             "User-Agent": "MAX-Channel-Poster/1.0"
         }
         
-        # Если есть файлы — убираем Content-Type, aiohttp поставит multipart
         if files:
             headers.pop("Content-Type", None)
         
@@ -270,7 +248,7 @@ class MAXClient:
         
         logger.info(f"[MAX] ▶️ #{self.request_count} {method} {url}")
         logger.debug(f"[MAX] Headers: { {k: ('***' if 'Auth' in k else v) for k, v in headers.items()} }")
-        if data:
+        if 
             logger.debug(f"[MAX] Body: {json.dumps(data, ensure_ascii=False)[:500]}")
         if params:
             logger.debug(f"[MAX] Params: {params}")
@@ -282,9 +260,8 @@ class MAXClient:
         for attempt in range(max_retries):
             try:
                 if files:
-                    # Загрузка с файлами (multipart)
                     form = FormData()
-                    if data:
+                    if 
                         for key, value in data.items():
                             form.add_field(key, json.dumps(value) if isinstance(value, (dict, list)) else str(value))
                     for key, file_data in files.items():
@@ -296,7 +273,6 @@ class MAXClient:
                     ) as response:
                         return await self._handle_response(response, start_time, attempt)
                 else:
-                    # Обычный JSON-запрос
                     async with self.session.request(
                         method=method, url=url, headers=headers,
                         params=params, json=data, timeout=self.timeout
@@ -329,25 +305,21 @@ class MAXClient:
         return {"error": "max_retries_exceeded"}
     
     async def _handle_response(self, response, start_time: float, attempt: int) -> Dict:
-        """Обрабатывает ответ от API"""
         elapsed = time.time() - start_time
         text = await response.text()
         
         logger.info(f"[MAX] ← #{attempt+1} {response.status} in {elapsed:.2f}s | {text[:300]}")
         
-        # Rate limit
         if response.status == 429:
             retry_after = int(response.headers.get('Retry-After', 30))
             logger.warning(f"[MAX] ⏳ Rate limit, waiting {retry_after}s")
             await asyncio.sleep(retry_after)
             return {"error": "rate_limited", "retry_after": retry_after}
         
-        # Auth error
         if response.status == 401:
             logger.error(f"[MAX] 🔐 Auth failed (401): {text[:200]}")
             return {"error": "auth_failed", "detail": text}
         
-        # Success
         if response.status == 200:
             try:
                 result = json.loads(text) if text.strip() else {}
@@ -357,7 +329,6 @@ class MAXClient:
                 logger.warning(f"[MAX] ⚠️ Response is not JSON: {text[:200]}")
                 return {"raw": text}
         
-        # Other errors
         logger.warning(f"[MAX] ❌ HTTP {response.status}: {text[:300]}")
         return {"error": f"HTTP_{response.status}", "detail": text, "status": response.status}
     
@@ -366,7 +337,6 @@ class MAXClient:
     async def send_message(self, chat_id: Union[str, int], text: str, 
                           buttons: List[Dict] = None, markup: List[Dict] = None,
                           attachments: List[Dict] = None) -> Dict:
-        """Отправляет сообщение пользователю или в канал"""
         logger.info(f"[MAX] 📤 send_message(chat_id={chat_id}, text_len={len(text)}, buttons={len(buttons) if buttons else 0})")
         
         payload = {"text": text}
@@ -379,13 +349,11 @@ class MAXClient:
         if attachments:
             payload["attachments"] = attachments
         
-        # 🔥 Рабочий формат: параметр в URL
         endpoint = f"/messages?chat_id={chat_id}"
         return await self._request("POST", endpoint, data=payload)
     
     async def edit_message(self, message_id: str, text: str = None,
                           buttons: List[Dict] = None) -> Dict:
-        """Редактирует опубликованное сообщение"""
         logger.info(f"[MAX] ✏️ edit_message(message_id={message_id})")
         
         payload = {}
@@ -398,19 +366,18 @@ class MAXClient:
         return await self._request("PUT", endpoint, data=payload)
     
     async def get_message_stats(self, message_id: str) -> Dict:
-        """Получает статистику по сообщению"""
         logger.info(f"[MAX] 📊 get_message_stats(message_id={message_id})")
         endpoint = f"/messages/{message_id}/stats"
         return await self._request("GET", endpoint)
     
     async def register_webhook(self, webhook_url: str, chat_id: str) -> bool:
-        """Регистрирует вебхук"""
         logger.info(f"[MAX] 🔗 register_webhook(url={webhook_url}, chat_id={chat_id})")
         
+        # 🔧 FIX: только message_created (остальные типы не поддерживаются)
         body = {
             "url": webhook_url,
             "chat_id": chat_id,
-            "update_types": ["message_created", "message_updated", "message_deleted"]
+            "update_types": ["message_created"]
         }
         
         result = await self._request("POST", "/subscriptions", data=body)
@@ -418,9 +385,8 @@ class MAXClient:
         logger.info(f"[MAX] {'✅' if success else '❌'} Webhook registration: {result}")
         return success
     
-    async def upload_media(self, file_data: bytes, filename: str, 
+    async def upload_media(self, file_ bytes, filename: str, 
                           media_type: str = 'photo') -> Dict:
-        """Загружает медиафайл и возвращает ID"""
         logger.info(f"[MAX] 📤 upload_media(filename={filename}, type={media_type}, size={len(file_data)}B)")
         
         endpoint = "/media/upload"
@@ -439,22 +405,20 @@ class MAXClient:
 # 🖼 MEDIA MANAGER
 # ===================================================================
 class MediaManager:
-    """Управление медиафайлами: скачивание, кэширование, загрузка"""
+    """Управление медиафайлами"""
     
     SUPPORTED_TYPES = {'photo', 'video', 'audio', 'document'}
     
     def __init__(self, cache_dir: Path, max_items: int = 10):
         self.cache_dir = cache_dir
         self.max_items = max_items
-        self.media_cache: Dict[str, Dict] = {}  # file_hash -> metadata
+        self.media_cache: Dict[str, Dict] = {}
         logger.info(f"[MEDIA] 🖼 MediaManager initialized | cache_dir={cache_dir} | max_items={max_items}")
     
-    def _generate_hash(self, data: bytes) -> str:
-        """Генерирует хэш файла"""
+    def _generate_hash(self,  bytes) -> str:
         return hashlib.sha256(data).hexdigest()[:16]
     
     async def download_and_cache(self, url: str, filename: str = None) -> Optional[Dict]:
-        """Скачивает файл по URL и кэширует его"""
         logger.info(f"[MEDIA] 📥 download_and_cache(url={url[:100]}..., filename={filename})")
         
         try:
@@ -467,11 +431,9 @@ class MediaManager:
                     data = await response.read()
                     file_hash = self._generate_hash(data)
                     
-                    # Определяем тип
                     content_type = response.headers.get('Content-Type', '')
                     media_type = 'photo' if 'image' in content_type else 'video' if 'video' in content_type else 'document'
                     
-                    # Сохраняем в кэш
                     cache_path = self.cache_dir / f"{file_hash}.bin"
                     cache_path.write_bytes(data)
                     
@@ -494,7 +456,6 @@ class MediaManager:
             return None
     
     def get_cached_file(self, file_hash: str) -> Optional[bytes]:
-        """Возвращает данные файла из кэша"""
         if file_hash in self.media_cache:
             cache_path = Path(self.media_cache[file_hash]['cache_path'])
             if cache_path.exists():
@@ -503,7 +464,6 @@ class MediaManager:
         return None
     
     def cleanup_old_cache(self, max_age_hours: int = 24):
-        """Удаляет старые файлы из кэша"""
         logger.info(f"[MEDIA] 🧹 Cleaning cache older than {max_age_hours}h")
         now = datetime.now()
         removed = 0
@@ -523,7 +483,6 @@ class MediaManager:
         return removed
     
     def parse_collage_attachments(self, attachments: List[Dict]) -> List[Dict]:
-        """Парсит вложения коллажа из сообщения MAX"""
         logger.info(f"[MEDIA] 🔍 parse_collage_attachments(count={len(attachments)})")
         result = []
         
@@ -554,7 +513,7 @@ class MediaManager:
 
 
 # ===================================================================
-# ⏰ SCHEDULER (отложенная публикация)
+# ⏰ SCHEDULER
 # ===================================================================
 class PublishScheduler:
     """Планировщик отложенных публикаций"""
@@ -563,26 +522,19 @@ class PublishScheduler:
         self.max_client = max_client
         self.channel_id = channel_id
         self.scheduler = AsyncIOScheduler(timezone=SCHEDULER_TIMEZONE)
-        self.scheduled_posts: Dict[str, Dict] = {}  # job_id -> post_data
+        self.scheduled_posts: Dict[str, Dict] = {}
         logger.info(f"[SCHEDULER] ⏰ PublishScheduler initialized | timezone={SCHEDULER_TIMEZONE}")
     
     def start(self):
-        """Запускает планировщик"""
         self.scheduler.start()
         logger.info("[SCHEDULER] 🚀 Scheduler started")
     
     def stop(self):
-        """Останавливает планировщик"""
         self.scheduler.shutdown()
         logger.info("[SCHEDULER] 🛑 Scheduler stopped")
     
     def parse_datetime(self, dt_str: str) -> Optional[datetime]:
-        """Парсит строку времени в datetime"""
-        formats = [
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%d.%m.%Y %H:%M",
-        ]
+        formats = ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"]
         for fmt in formats:
             try:
                 return datetime.strptime(dt_str.strip(), fmt)
@@ -591,7 +543,6 @@ class PublishScheduler:
         return None
     
     def schedule_post(self, user_id: int, post_data: Dict, publish_at: str) -> Optional[str]:
-        """Планирует публикацию поста"""
         logger.info(f"[SCHEDULER] 📅 schedule_post(user_id={user_id}, publish_at={publish_at})")
         
         publish_time = self.parse_datetime(publish_at)
@@ -617,7 +568,6 @@ class PublishScheduler:
                 )
                 if "error" not in result:
                     logger.info(f"[SCHEDULER] ✅ Scheduled post {job_id} published successfully")
-                    # TODO: сохранить ID сообщения для статистики
                 else:
                     logger.error(f"[SCHEDULER] ❌ Failed to publish scheduled post {job_id}: {result}")
             except Exception as e:
@@ -636,7 +586,6 @@ class PublishScheduler:
         return job_id
     
     def list_scheduled(self, user_id: int = None) -> List[Dict]:
-        """Возвращает список запланированных постов"""
         result = []
         for job_id, data in self.scheduled_posts.items():
             if user_id is None or data['user_id'] == user_id:
@@ -649,7 +598,6 @@ class PublishScheduler:
         return result
     
     def cancel_scheduled(self, job_id: str) -> bool:
-        """Отменяет запланированную публикацию"""
         if job_id in self.scheduled_posts:
             try:
                 self.scheduler.remove_job(job_id)
@@ -669,25 +617,23 @@ class StatsCollector:
     
     def __init__(self, stats_file: Path):
         self.stats_file = stats_file
-        self.stats: Dict[str, Dict] = {}  # message_id -> stats
-        self.clicks: Dict[str, Dict[int, int]] = {}  # message_id -> {button_index: count}
+        self.stats: Dict[str, Dict] = {}
+        self.clicks: Dict[str, Dict[int, int]] = {}
         self._load_from_file()
         logger.info(f"[STATS] 📊 StatsCollector initialized | file={stats_file}")
     
     def _load_from_file(self):
-        """Загружает статистику из файла"""
         if self.stats_file.exists():
             try:
                 with open(self.stats_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.stats = data.get('messages', {})
                     self.clicks = {k: {int(kk): vv for kk, vv in v.items()} for k, v in data.get('clicks', {}).items()}
-                logger.info(f"[STATS] 📥 Loaded stats: {len(self.stats)} messages, {sum(len(c) for c in self.clicks.values())} button click records")
+                logger.info(f"[STATS] 📥 Loaded stats: {len(self.stats)} messages")
             except Exception as e:
                 logger.error(f"[STATS] ❌ Failed to load stats file: {e}")
     
     def _save_to_file(self):
-        """Сохраняет статистику в файл"""
         try:
             data = {
                 'messages': self.stats,
@@ -701,7 +647,6 @@ class StatsCollector:
             logger.warning(f"[STATS] ⚠️ Failed to save stats: {e}")
     
     def record_message(self, message_id: str, chat_id: str, text: str, published_at: str):
-        """Записывает информацию о новом сообщении"""
         self.stats[message_id] = {
             'chat_id': chat_id,
             'text_preview': text[:100],
@@ -715,7 +660,6 @@ class StatsCollector:
         logger.info(f"[STATS] 📝 Recorded new message {message_id}")
     
     def update_views(self, message_id: str, views: int):
-        """Обновляет счётчик просмотров"""
         if message_id in self.stats:
             old_views = self.stats[message_id]['views']
             self.stats[message_id]['views'] = views
@@ -728,7 +672,6 @@ class StatsCollector:
             logger.debug(f"[STATS] 👁 Message {message_id}: views {old_views} → {views}")
     
     def record_click(self, message_id: str, button_index: int, user_id: int):
-        """Записывает клик по кнопке"""
         if message_id not in self.clicks:
             self.clicks[message_id] = {}
         if button_index not in self.clicks[message_id]:
@@ -738,7 +681,6 @@ class StatsCollector:
         logger.info(f"[STATS] 🖱 Click recorded: message={message_id} button={button_index} user={user_id}")
     
     def get_stats(self, message_id: str = None) -> Union[Dict, List[Dict]]:
-        """Возвращает статистику"""
         if message_id:
             result = self.stats.get(message_id, {}).copy()
             if message_id in self.clicks:
@@ -758,14 +700,13 @@ class StatsCollector:
 
 
 # ===================================================================
-# 🎨 FORMATTER (прозрачная передача разметки)
+# 🎨 FORMATTER
 # ===================================================================
 class TextFormatter:
     """Прозрачная передача форматирования из MAX"""
     
     @staticmethod
     def parse_buttons(text: str) -> List[Dict]:
-        """Парсит кнопки из формата 'Текст | ссылка' (каждая с новой строки)"""
         logger.info(f"[FORMAT] 🔘 parse_buttons: input_lines={text.count(chr(10)) + 1}")
         
         buttons = []
@@ -794,14 +735,12 @@ class TextFormatter:
     
     @staticmethod
     def pass_through_markup(original_markup: List[Dict]) -> List[Dict]:
-        """Прозрачно передаёт markup из MAX без изменений"""
         logger.info(f"[FORMAT] 🎨 pass_through_markup: {len(original_markup)} entities")
-        # MAX уже присылает готовый markup — просто возвращаем его
         return original_markup if original_markup else []
 
 
 # ===================================================================
-# 🎮 HANDLERS (обработчики команд)
+# 🎮 HANDLERS
 # ===================================================================
 class CommandHandlers:
     """Обработчики команд бота"""
@@ -820,7 +759,6 @@ class CommandHandlers:
         logger.info("[HANDLERS] 🎮 CommandHandlers initialized")
     
     async def handle_start(self, user_id: int, send_callback):
-        """Обработка /start"""
         logger.info(f"[CMD] 🚀 handle_start(user_id={user_id})")
         
         if not self.auth.is_authorized(user_id):
@@ -850,7 +788,6 @@ class CommandHandlers:
         logger.info(f"[CMD] ✅ Sent start menu to user {user_id}")
     
     async def handle_password(self, user_id: int, password: str, send_callback):
-        """Обработка ввода пароля"""
         logger.info(f"[CMD] 🔐 handle_password(user_id={user_id})")
         
         if self.auth.check_password(user_id, password):
@@ -867,7 +804,6 @@ class CommandHandlers:
                 logger.warning(f"[CMD] 🔒 User {user_id} blocked after failed attempts")
     
     async def handle_post_command(self, user_id: int, send_callback):
-        """Начало создания поста: /post"""
         logger.info(f"[CMD] ✍️ handle_post_command(user_id={user_id})")
         
         if not self.auth.is_authorized(user_id):
@@ -890,7 +826,6 @@ class CommandHandlers:
         )
     
     async def handle_post_text(self, user_id: int, text: str, markup: List, send_callback):
-        """Обработка текста поста"""
         logger.info(f"[CMD] 📝 handle_post_text(user_id={user_id}, text_len={len(text)}, markup={len(markup)})")
         
         session = self.state.get_session_data(user_id)
@@ -908,7 +843,6 @@ class CommandHandlers:
         )
     
     async def handle_post_buttons(self, user_id: int, buttons_text: str, send_callback):
-        """Обработка кнопок поста"""
         logger.info(f"[CMD] 🔘 handle_post_buttons(user_id={user_id})")
         
         session = self.state.get_session_data(user_id)
@@ -922,10 +856,8 @@ class CommandHandlers:
                 await send_callback("❌ Не удалось распознать кнопки. Проверьте формат: `Текст | ссылка`")
                 return
         
-        # Сохраняем черновик
         self.state.save_draft(user_id, session.copy())
         
-        # Предлагаем предпросмотр
         keyboard = {
             "inline_keyboard": [
                 [{"text": "👁 Предпросмотр", "callback_data": "preview"}],
@@ -946,7 +878,6 @@ class CommandHandlers:
         )
     
     async def handle_preview(self, user_id: int, send_callback):
-        """Предпросмотр черновика"""
         logger.info(f"[CMD] 👁 handle_preview(user_id={user_id})")
         
         draft = self.state.get_draft(user_id)
@@ -954,14 +885,12 @@ class CommandHandlers:
             await send_callback("❌ Черновик не найден. Создайте пост через /post")
             return
         
-        # Отправляем предпросмотр как обычное сообщение
         await send_callback(
             f"👁 **Предпросмотр**\n\n{draft['text']}",
             {"inline_keyboard": [[{"text": btn['text'], "url": btn['url']} for btn in draft['buttons']]]} if draft['buttons'] else None,
             markup=draft.get('markup')
         )
         
-        # Возвращаем меню
         keyboard = {
             "inline_keyboard": [
                 [{"text": "✅ Опубликовать", "callback_data": "publish_now"}],
@@ -972,7 +901,6 @@ class CommandHandlers:
         await send_callback("Выберите действие:", keyboard)
     
     async def handle_publish(self, user_id: int, send_callback, immediate: bool = True):
-        """Публикация поста"""
         logger.info(f"[CMD] 🚀 handle_publish(user_id={user_id}, immediate={immediate})")
         
         draft = self.state.get_draft(user_id)
@@ -981,7 +909,6 @@ class CommandHandlers:
             return
         
         if immediate:
-            # Немедленная публикация
             await send_callback("⏳ Публикую...")
             
             result = await self.max_client.send_message(
@@ -1004,7 +931,6 @@ class CommandHandlers:
                 await send_callback(f"❌ Ошибка публикации: {result.get('detail', 'неизвестная')}")
                 logger.error(f"[CMD] ❌ Publish failed: {result}")
         else:
-            # Отложенная публикация — ждём ввод времени
             self.state.set_step(user_id, 'waiting_schedule_time')
             await send_callback(
                 "⏰ **Отложенная публикация**\n\n"
@@ -1016,7 +942,6 @@ class CommandHandlers:
             )
     
     async def handle_schedule_time(self, user_id: int, time_str: str, send_callback):
-        """Обработка времени отложенной публикации"""
         logger.info(f"[CMD] ⏰ handle_schedule_time(user_id={user_id}, time={time_str})")
         
         draft = self.state.get_draft(user_id)
@@ -1034,7 +959,6 @@ class CommandHandlers:
             await send_callback("❌ Не удалось запланировать. Проверьте формат даты.")
     
     async def handle_stats(self, user_id: int, send_callback):
-        """Показ статистики"""
         logger.info(f"[CMD] 📊 handle_stats(user_id={user_id})")
         
         all_stats = self.stats.get_stats()
@@ -1042,9 +966,8 @@ class CommandHandlers:
             await send_callback("📊 Статистика пока пуста")
             return
         
-        # Формируем отчёт
         report = ["📊 **Статистика публикаций**\n"]
-        for item in all_stats[-10:]:  # Последние 10
+        for item in all_stats[-10:]:
             report.append(f"• `{item['message_id'][:12]}...`")
             report.append(f"  👁 {item['views']} просмотров")
             if item.get('button_clicks'):
@@ -1055,7 +978,6 @@ class CommandHandlers:
         await send_callback('\n'.join(report))
     
     async def handle_settings(self, user_id: int, send_callback):
-        """Сервисное меню"""
         logger.info(f"[CMD] ⚙️ handle_settings(user_id={user_id})")
         
         keyboard = {
@@ -1074,18 +996,12 @@ class CommandHandlers:
         )
     
     async def handle_set_channel(self, user_id: int, new_channel_id: str, send_callback):
-        """Смена канала публикации"""
         logger.info(f"[CMD] 📢 handle_set_channel(user_id={user_id}, new_channel={new_channel_id})")
-        # В реальном коде здесь нужно обновить CHANNEL_ID в конфиге
-        # Для демо просто подтверждаем
         await send_callback(f"✅ Канал изменён на: `{new_channel_id}`\n\n⚠️ Для применения перезапустите бота или обновите переменную MAX_CHANNEL_ID")
     
     async def handle_set_password(self, user_id: int, new_password: str, send_callback):
-        """Смена пароля"""
         logger.info(f"[CMD] 🔑 handle_set_password(user_id={user_id})")
-        # В реальном коде обновить BOT_PASSWORD в env
         await send_callback("✅ Пароль изменён.\n\n🔁 Все пользователи должны будут авторизоваться заново.")
-        # Сбрасываем все сессии
         self.auth.authorized.clear()
         self.auth._save_to_file()
 
@@ -1125,26 +1041,30 @@ async def webhook_handler(request, handlers: CommandHandlers, send_callback_fact
 
 
 async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_callback_factory):
-    """Обработка входящего сообщения от пользователя"""
+    """Обработка входящего сообщения от пользователя — 🔧 ИСПРАВЛЕНА ОТПРАВКА"""
     logger.info("=" * 80)
     logger.info(f"[MSG] 📨 Processing incoming message")
     logger.info(f"[MSG] Full structure: {json.dumps(msg, ensure_ascii=False, indent=2)[:1500]}")
     
-    # Извлекаем ID пользователя
+    # 🔧 Извлекаем ID пользователя И chat_id для ответа
     recipient = msg.get('recipient', {})
     user_id = recipient.get('user_id') or recipient.get('chat_id') or recipient.get('id')
+    
+    # 🔧 FIX: используем chat_id из recipient для отправки ответов!
+    chat_id_for_reply = recipient.get('chat_id') or recipient.get('user_id') or user_id
     
     if not user_id:
         logger.error(f"[MSG] ❌ Could not extract user_id from recipient: {recipient}")
         return
     
-    logger.info(f"[MSG] 👤 user_id={user_id}")
+    logger.info(f"[MSG] 👤 user_id={user_id} | reply_chat_id={chat_id_for_reply}")
     
-    # Создаём колбэк для отправки ответа
+    # 🔧 Создаём колбэк для отправки ответа — ИСПРАВЛЕНО
     async def send_callback(text: str, keyboard: Dict = None, markup: List = None):
-        logger.info(f"[SEND] 📤 Sending to user {user_id}: text_len={len(text)}, buttons={len(keyboard['inline_keyboard']) if keyboard else 0}")
+        # 🔧 Используем chat_id_for_reply для отправки!
+        logger.info(f"[SEND] 📤 Sending to chat_id={chat_id_for_reply}: text_len={len(text)}, buttons={len(keyboard['inline_keyboard']) if keyboard else 0}")
         result = await handlers.max_client.send_message(
-            chat_id=user_id,
+            chat_id=chat_id_for_reply,  # 🔧 FIX: chat_id вместо user_id
             text=text,
             buttons=keyboard['inline_keyboard'] if keyboard and 'inline_keyboard' in keyboard else None,
             markup=markup
@@ -1188,7 +1108,6 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
         await handlers.handle_settings(user_id, send_callback)
     
     else:
-        # Неизвестная команда
         if handlers.auth.is_authorized(user_id):
             await send_callback("❓ Неизвестная команда. Доступные: /start, /post, /stats, /settings")
         else:
@@ -1201,16 +1120,14 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
 # 🌐 WEB SERVER
 # ===================================================================
 async def health_check(request):
-    """Health check endpoint"""
     return web.json_response({
         'ok': True,
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0-final'
+        'version': '1.0.0-final-corrected'
     })
 
 async def root_handler(request):
-    """Root endpoint"""
     return web.json_response({
         'bot': 'MAX Channel Poster',
         'webhook': 'active',
@@ -1218,12 +1135,10 @@ async def root_handler(request):
     })
 
 async def on_startup(app):
-    """Инициализация при старте"""
     logger.info("🚀" * 40)
-    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT")
+    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT — CORRECTED")
     logger.info("🚀" * 40)
     
-    # Инициализируем компоненты
     app['auth'] = AuthManager(BOT_PASSWORD, AUTH_FILE)
     app['state'] = StateManager()
     app['max_client'] = MAXClient(BOT_TOKEN, BASE_API_URL, API_TIMEOUT)
@@ -1244,7 +1159,6 @@ async def on_startup(app):
         channel_id=CHANNEL_ID
     )
     
-    # Регистрируем вебхук
     if RENDER_EXTERNAL_URL:
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
         await app['max_client'].register_webhook(webhook_url, CHANNEL_ID)
@@ -1252,40 +1166,33 @@ async def on_startup(app):
     logger.info("✅ All components initialized")
 
 async def on_cleanup(app):
-    """Очистка при остановке"""
     logger.info("🔚 Shutting down...")
     
-    # Останавливаем планировщик
     if 'scheduler' in app:
         app['scheduler'].stop()
     
-    # Закрываем HTTP-сессию
     if 'max_client' in app:
         await app['max_client'].close()
     
-    # Очищаем кэш медиа
     if 'media_mgr' in app:
-        app['media_mgr'].cleanup_old_cache(0)  # Удаляем всё при выходе
+        app['media_mgr'].cleanup_old_cache(0)
     
     logger.info("🔚 Cleanup complete")
 
 
 def create_app():
-    """Фабрика приложения"""
     app = web.Application()
     
-    # Маршруты
     app.add_routes([
         web.get('/', root_handler),
         web.get('/health', health_check),
         web.post('/webhook', lambda req: webhook_handler(
             req, 
             app['handlers'], 
-            lambda text, keyboard=None, markup=None: None  # Заглушка, реальная передаётся в handle_incoming_message
+            lambda text, keyboard=None, markup=None: None
         )),
     ])
     
-    # Хуки жизненного цикла
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     
