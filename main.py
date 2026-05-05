@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import json
-from typing import Dict, Optional
 
 from aiohttp import web, ClientSession, ClientTimeout
 from dotenv import load_dotenv
@@ -21,11 +20,14 @@ CHANNEL_ID = os.getenv('MAX_CHANNEL_ID', '').strip()
 BASE_API_URL = os.getenv('MAX_API_URL', 'https://platform-api.max.ru').rstrip('/')
 RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL', '')
 
-user_sessions: Dict[int, Dict] = {}
-api_session: Optional[ClientSession] = None
+user_sessions = {}
+api_session = None
 
 
-async def api_request(method: str, endpoint: str,  Dict = None, max_retries: int = 3):
+# ===================================================================
+# API ЗАПРОСЫ
+# ===================================================================
+async def api_request(method, endpoint, data=None, max_retries=3):
     headers = {
         "Authorization": BOT_TOKEN,
         "Content-Type": "application/json",
@@ -66,7 +68,11 @@ async def api_request(method: str, endpoint: str,  Dict = None, max_retries: int
     return {"error": "max_retries"}
 
 
-async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
+# ===================================================================
+# ОТПРАВКА СООБЩЕНИЙ
+# ===================================================================
+async def send_message(chat_id, text, keyboard=None):
+    """Отправка сообщения пользователю"""
     buttons = []
     if keyboard and "inline_keyboard" in keyboard:
         for row in keyboard["inline_keyboard"]:
@@ -83,7 +89,8 @@ async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
     return "error" not in result
 
 
-async def publish_to_channel(post_ Dict) -> bool:
+async def publish_to_channel(post_data):
+    """Публикация поста в канал — БЕЗ аннотаций типов!"""
     try:
         buttons = []
         if post_data.get('button_title') and post_data.get('button_url'):
@@ -99,7 +106,11 @@ async def publish_to_channel(post_ Dict) -> bool:
         return False
 
 
-async def register_webhook(webhook_url: str) -> bool:
+# ===================================================================
+# РЕГИСТРАЦИЯ ВЕБХУКА
+# ===================================================================
+async def register_webhook(webhook_url):
+    """Регистрирует вебхук в MAX API"""
     logger.info(f"[WEBHOOK] Registering: {webhook_url} for chat {CHANNEL_ID}")
     
     body = {
@@ -118,7 +129,11 @@ async def register_webhook(webhook_url: str) -> bool:
         return False
 
 
+# ===================================================================
+# ОБРАБОТКА ВХОДЯЩИХ СООБЩЕНИЙ
+# ===================================================================
 async def webhook_handler(request):
+    """Принимает обновления от MAX API"""
     logger.info(f"[WEBHOOK] 📨 {request.method} from {request.remote}")
     
     if request.method != 'POST':
@@ -142,37 +157,43 @@ async def webhook_handler(request):
         return web.Response(status=500)
 
 
-async def handle_max_message(msg: Dict):
+async def handle_max_message(msg):
     """Обработка сообщения от пользователя"""
-    logger.info(f"[HANDLE] 📦 Message structure: {json.dumps(msg, ensure_ascii=False)[:800]}")
+    # Логируем структуру для отладки
+    logger.info(f"[HANDLE] 📦 Message keys: {list(msg.keys())}")
     
+    # Пробуем ВСЕ возможные пути извлечения chat_id
     chat_id = None
     
+    # Путь 1: msg -> from -> id
     if isinstance(msg.get('from'), dict):
         chat_id = msg['from'].get('id')
     
+    # Путь 2: msg -> body -> from -> id
     if not chat_id and isinstance(msg.get('body'), dict):
         body_from = msg['body'].get('from')
         if isinstance(body_from, dict):
             chat_id = body_from.get('id')
     
+    # Путь 3: msg -> body -> user_id / chat_id
     if not chat_id and isinstance(msg.get('body'), dict):
         chat_id = msg['body'].get('user_id') or msg['body'].get('chat_id')
     
+    # Путь 4: msg -> user_id / chat_id напрямую
     if not chat_id:
         chat_id = msg.get('user_id') or msg.get('chat_id')
     
+    # Извлекаем текст
     body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
     text = body.get('text', '') or msg.get('text', '')
     
     if not chat_id:
-        logger.warning(f"[HANDLE] ❌ No chat_id found. Available keys: {list(msg.keys())}")
-        if isinstance(msg.get('body'), dict):
-            logger.warning(f"[HANDLE] Body keys: {list(msg['body'].keys())}")
+        logger.warning(f"[HANDLE] ❌ No chat_id found. Body keys: {list(body.keys()) if isinstance(body, dict) else 'N/A'}")
         return
     
     logger.info(f"[HANDLE] 💬 From {chat_id}: {text[:100] if text else '[empty]'}")
     
+    # Обработка команд
     if text == "/start":
         kb = {"inline_keyboard": [
             [{"text": "➕ Новый пост", "callback_data": "new_post"}],
@@ -207,6 +228,9 @@ async def handle_max_message(msg: Dict):
             del user_sessions[chat_id]
 
 
+# ===================================================================
+# WEB SERVER
+# ===================================================================
 async def health_check(request):
     return web.json_response({"ok": True, "status": "running"})
 
