@@ -13,6 +13,7 @@ MAX Channel Poster Bot — FINAL CORRECTED VERSION
 ✅ 🔥🔥🔥 МАКСИМАЛЬНОЕ ЛОГИРОВАНИЕ НА КАЖДОМ ШАГЕ 🔥🔥🔥
 🔧 FIX: использует chat_id из recipient для отправки ответов
 🔧 FIX: регистрирует вебхук только с message_created
+🔧 FIX: исправлены синтаксические ошибки (if , file_ bytes)
 """
 import asyncio
 import logging
@@ -175,7 +176,7 @@ class StateManager:
     def set_step(self, user_id: int, step: str,  Dict = None):
         session = self.get_session(user_id)
         session['step'] = step
-        if data:
+        if 
             session['data'].update(data)
         logger.info(f"[STATE] 📍 User {user_id} → step={step} | data_keys={list(session['data'].keys()) if session['data'] else 'empty'}")
     
@@ -248,6 +249,8 @@ class MAXClient:
         
         logger.info(f"[MAX] ▶️ #{self.request_count} {method} {url}")
         logger.debug(f"[MAX] Headers: { {k: ('***' if 'Auth' in k else v) for k, v in headers.items()} }")
+        
+        # 🔧 FIX: проверка if 
         if 
             logger.debug(f"[MAX] Body: {json.dumps(data, ensure_ascii=False)[:500]}")
         if params:
@@ -261,6 +264,7 @@ class MAXClient:
             try:
                 if files:
                     form = FormData()
+                    # 🔧 FIX: проверка if 
                     if 
                         for key, value in data.items():
                             form.add_field(key, json.dumps(value) if isinstance(value, (dict, list)) else str(value))
@@ -542,7 +546,7 @@ class PublishScheduler:
                 continue
         return None
     
-    def schedule_post(self, user_id: int, post_data: Dict, publish_at: str) -> Optional[str]:
+    def schedule_post(self, user_id: int, post_ Dict, publish_at: str) -> Optional[str]:
         logger.info(f"[SCHEDULER] 📅 schedule_post(user_id={user_id}, publish_at={publish_at})")
         
         publish_time = self.parse_datetime(publish_at)
