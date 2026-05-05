@@ -57,7 +57,7 @@ async def api_request(method, endpoint, data=None, max_retries=3):
                     except:
                         return {"raw": text}
                 
-                logger.warning(f"[API] HTTP {response.status}: {text[:200]}")
+                logger.warning(f"[API] HTTP {response.status}: {text[:300]}")
                 return {"error": f"HTTP_{response.status}", "detail": text}
                 
         except Exception as e:
@@ -69,10 +69,10 @@ async def api_request(method, endpoint, data=None, max_retries=3):
 
 
 # ===================================================================
-# ОТПРАВКА СООБЩЕНИЙ
+# ОТПРАВКА СООБЩЕНИЙ (ИСПРАВЛЕННЫЙ ЭНДПОИНТ!)
 # ===================================================================
-async def send_message(chat_id, text, keyboard=None):
-    """Отправка сообщения пользователю"""
+async def send_message(user_id, text, keyboard=None):
+    """Отправка сообщения пользователю через /messages?user_id=..."""
     buttons = []
     if keyboard and "inline_keyboard" in keyboard:
         for row in keyboard["inline_keyboard"]:
@@ -83,7 +83,9 @@ async def send_message(chat_id, text, keyboard=None):
                 buttons.append(btn_data)
     
     payload = {"text": text, "buttons": buttons if buttons else []}
-    endpoint = f"/chats/{chat_id}/messages"
+    
+    # 🔥 ИСПРАВЛЕНИЕ: используем /messages?user_id=... (как в рабочем коде!)
+    endpoint = f"/messages?user_id={user_id}"
     
     logger.info(f"[SEND] → {endpoint} | text_len={len(text)} | buttons={len(buttons)}")
     result = await api_request("POST", endpoint, data=payload)
@@ -104,7 +106,9 @@ async def publish_to_channel(post_data):
             buttons.append({"text": post_data['button_title'], "url": post_data['button_url']})
         
         payload = {"text": post_data.get('text', ''), "buttons": buttons if buttons else []}
-        endpoint = f"/chats/{CHANNEL_ID}/messages"
+        
+        # 🔥 Для канала тоже используем /messages?chat_id=...
+        endpoint = f"/messages?chat_id={CHANNEL_ID}"
         
         logger.info(f"[PUBLISH] → {endpoint} | text_len={len(payload['text'])}")
         result = await api_request("POST", endpoint, data=payload)
@@ -157,7 +161,6 @@ async def webhook_handler(request):
         body = await request.json()
         update_type = body.get('update_type', 'unknown')
         logger.info(f"[WEBHOOK] Type: {update_type}")
-        logger.info(f"[WEBHOOK] Full body preview: {json.dumps(body, ensure_ascii=False)[:500]}")
         
         if update_type == 'message_created' and (msg := body.get('message')):
             await handle_max_message(msg)
@@ -173,105 +176,53 @@ async def webhook_handler(request):
 
 
 async def handle_max_message(msg):
-    """Обработка сообщения от пользователя — с ПОЛНЫМ логированием"""
+    """Обработка сообщения от пользователя"""
     
-    # 🔥 Логируем ВСЮ структуру сообщения для отладки
+    # Логируем структуру
     logger.info("=" * 80)
-    logger.info(f"[HANDLE] 📦 FULL MESSAGE STRUCTURE:")
-    logger.info(json.dumps(msg, ensure_ascii=False, indent=2)[:2000])
-    logger.info(f"[HANDLE] Top-level keys: {list(msg.keys())}")
+    logger.info(f"[HANDLE] 📦 Message preview: {json.dumps(msg, ensure_ascii=False)[:800]}")
     
-    # 🔥 Пробуем ВСЕ возможные пути извлечения chat_id
-    chat_id = None
-    chat_id_source = None
-    
-    # Путь 1: recipient.id (на основе логов!)
+    # 🔥 Извлекаем user_id (не chat_id!) из recipient
+    user_id = None
     if isinstance(msg.get('recipient'), dict):
-        cid = msg['recipient'].get('id') or msg['recipient'].get('chat_id') or msg['recipient'].get('user_id')
-        if cid:
-            chat_id = cid
-            chat_id_source = 'recipient'
-            logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in recipient")
+        # 🔥 Берём user_id, а не chat_id!
+        user_id = msg['recipient'].get('user_id') or msg['recipient'].get('chat_id') or msg['recipient'].get('id')
+        logger.info(f"[HANDLE] recipient keys: {list(msg['recipient'].keys())}")
+        logger.info(f"[HANDLE] Extracted user_id={user_id} from recipient")
     
-    # Путь 2: sender.id
-    if not chat_id and isinstance(msg.get('sender'), dict):
-        cid = msg['sender'].get('id') or msg['sender'].get('chat_id') or msg['sender'].get('user_id')
-        if cid:
-            chat_id = cid
-            chat_id_source = 'sender'
-            logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in sender")
+    if not user_id:
+        logger.error(f"[HANDLE] ❌ No user_id found!")
+        return
     
-    # Путь 3: from.id (на всякий случай)
-    if not chat_id and isinstance(msg.get('from'), dict):
-        cid = msg['from'].get('id')
-        if cid:
-            chat_id = cid
-            chat_id_source = 'from'
-            logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in from")
-    
-    # Путь 4: body.from.id
-    if not chat_id and isinstance(msg.get('body'), dict):
-        body = msg['body']
-        if isinstance(body.get('from'), dict):
-            cid = body['from'].get('id')
-            if cid:
-                chat_id = cid
-                chat_id_source = 'body.from'
-                logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in body.from")
-    
-    # Путь 5: body.user_id / body.chat_id
-    if not chat_id and isinstance(msg.get('body'), dict):
-        cid = msg['body'].get('user_id') or msg['body'].get('chat_id')
-        if cid:
-            chat_id = cid
-            chat_id_source = 'body'
-            logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in body")
-    
-    # Путь 6: напрямую в корне
-    if not chat_id:
-        cid = msg.get('user_id') or msg.get('chat_id') or msg.get('id')
-        if cid:
-            chat_id = cid
-            chat_id_source = 'root'
-            logger.info(f"[HANDLE] ✅ Found chat_id={chat_id} in root")
-    
-    # 🔥 Извлекаем текст
+    # Извлекаем текст
     body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
     text = body.get('text', '') or msg.get('text', '')
     
-    # 🔥 Если chat_id не найден — логируем детали и выходим
-    if not chat_id:
-        logger.error(f"[HANDLE] ❌ CRITICAL: No chat_id found!")
-        logger.error(f"[HANDLE] recipient keys: {list(msg.get('recipient', {}).keys()) if isinstance(msg.get('recipient'), dict) else 'N/A'}")
-        logger.error(f"[HANDLE] sender keys: {list(msg.get('sender', {}).keys()) if isinstance(msg.get('sender'), dict) else 'N/A'}")
-        logger.error(f"[HANDLE] body keys: {list(body.keys()) if isinstance(body, dict) else 'N/A'}")
-        return
+    logger.info(f"[HANDLE] 💬 From user_id={user_id}: '{text[:100] if text else '[empty]'}'")
     
-    logger.info(f"[HANDLE] 💬 From {chat_id} (via {chat_id_source}): '{text[:100] if text else '[empty]'}'")
-    
-    # 🔥 Обработка команд
+    # Обработка команд
     if text == "/start":
-        logger.info(f"[HANDLE] 🎯 Processing /start for {chat_id}")
+        logger.info(f"[HANDLE] 🎯 Processing /start for user_id={user_id}")
         kb = {"inline_keyboard": [
             [{"text": "➕ Новый пост", "callback_data": "new_post"}],
             [{"text": "ℹ️ Помощь", "callback_data": "help"}]
         ]}
-        await send_message(chat_id, "👋 **MAX Channel Poster**\n\nНажми «Новый пост»", kb)
+        await send_message(user_id, "👋 **MAX Channel Poster**\n\nНажми «Новый пост»", kb)
     
     elif text == "/post":
-        logger.info(f"[HANDLE] 🎯 Processing /post for {chat_id}")
-        user_sessions[chat_id] = {"step": "waiting_text"}
-        await send_message(chat_id, "📝 Отправь текст поста")
+        logger.info(f"[HANDLE] 🎯 Processing /post for user_id={user_id}")
+        user_sessions[user_id] = {"step": "waiting_text"}
+        await send_message(user_id, "📝 Отправь текст поста")
     
-    elif chat_id in user_sessions:
-        sd = user_sessions[chat_id]
+    elif user_id in user_sessions:
+        sd = user_sessions[user_id]
         step = sd.get("step")
-        logger.info(f"[HANDLE] 🎯 Session step={step} for {chat_id}")
+        logger.info(f"[HANDLE] 🎯 Session step={step} for user_id={user_id}")
         
         if step == "waiting_text":
             sd["text"] = text
             sd["step"] = "waiting_button"
-            await send_message(chat_id, "🔘 Кнопка: `Текст | ссылка`\nИли `пропустить`")
+            await send_message(user_id, "🔘 Кнопка: `Текст | ссылка`\nИли `пропустить`")
         
         elif step == "waiting_button":
             if text and text.lower() not in ("пропустить", "skip", "-"):
@@ -280,11 +231,11 @@ async def handle_max_message(msg):
                     sd["button_title"] = parts[0].strip()
                     sd["button_url"] = parts[1].strip()
                 else:
-                    await send_message(chat_id, "❌ Формат: `Текст | ссылка`")
+                    await send_message(user_id, "❌ Формат: `Текст | ссылка`")
                     return
             ok = await publish_to_channel(sd)
-            await send_message(chat_id, "✅ Опубликовано!" if ok else "❌ Ошибка")
-            del user_sessions[chat_id]
+            await send_message(user_id, "✅ Опубликовано!" if ok else "❌ Ошибка")
+            del user_sessions[user_id]
     
     logger.info("=" * 80)
 
