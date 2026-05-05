@@ -26,11 +26,11 @@ api_session: Optional[ClientSession] = None
 
 
 # ===================================================================
-# API ЗАПРОСЫ (как в рабочем боте)
+# API ЗАПРОСЫ
 # ===================================================================
-async def api_request(method: str, endpoint: str,  Dict = None, max_retries: int = 3):
+async def api_request(method: str, endpoint: str, data: Dict = None, max_retries: int = 3):
     headers = {
-        "Authorization": BOT_TOKEN,  # 🔥 Сырой токен, без префиксов!
+        "Authorization": BOT_TOKEN,
         "Content-Type": "application/json",
         "User-Agent": "MAX-Channel-Poster/1.0"
     }
@@ -70,7 +70,7 @@ async def api_request(method: str, endpoint: str,  Dict = None, max_retries: int
 
 
 # ===================================================================
-# ОТПРАВКА СООБЩЕНИЙ (исправленные эндпоинты)
+# ОТПРАВКА СООБЩЕНИЙ
 # ===================================================================
 async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
     """Отправка сообщения пользователю"""
@@ -84,14 +84,13 @@ async def send_message(chat_id: int, text: str, keyboard: Dict = None) -> bool:
                 buttons.append(btn_data)
     
     payload = {"text": text, "buttons": buttons if buttons else []}
-    # 🔥 Исправленный эндпоинт (как в рабочем боте)
     endpoint = f"/chats/{chat_id}/messages"
     
     result = await api_request("POST", endpoint, data=payload)
     return "error" not in result
 
 
-async def publish_to_channel(post_ Dict) -> bool:
+async def publish_to_channel(post_data: Dict) -> bool:
     """Публикация поста в канал"""
     try:
         buttons = []
@@ -99,7 +98,6 @@ async def publish_to_channel(post_ Dict) -> bool:
             buttons.append({"text": post_data['button_title'], "url": post_data['button_url']})
         
         payload = {"text": post_data.get('text', ''), "buttons": buttons if buttons else []}
-        # 🔥 Эндпоинт для канала (аналогично чату)
         endpoint = f"/chats/{CHANNEL_ID}/messages"
         
         result = await api_request("POST", endpoint, data=payload)
@@ -110,7 +108,7 @@ async def publish_to_channel(post_ Dict) -> bool:
 
 
 # ===================================================================
-# РЕГИСТРАЦИЯ ВЕБХУКА (как в рабочем боте!)
+# РЕГИСТРАЦИЯ ВЕБХУКА
 # ===================================================================
 async def register_webhook(webhook_url: str) -> bool:
     """Регистрирует вебхук в MAX API"""
@@ -119,7 +117,7 @@ async def register_webhook(webhook_url: str) -> bool:
     body = {
         "url": webhook_url,
         "chat_id": CHANNEL_ID,
-        "update_types": ["message_created"]  # 🔥 Ключевое поле!
+        "update_types": ["message_created"]
     }
     
     result = await api_request("POST", "/subscriptions", data=body)
@@ -133,7 +131,7 @@ async def register_webhook(webhook_url: str) -> bool:
 
 
 # ===================================================================
-# ОБРАБОТКА ВХОДЯЩИХ СООБЩЕНИЙ (вебхук)
+# ОБРАБОТКА ВХОДЯЩИХ СООБЩЕНИЙ
 # ===================================================================
 async def webhook_handler(request):
     """Принимает обновления от MAX API"""
@@ -147,7 +145,6 @@ async def webhook_handler(request):
         update_type = body.get('update_type', 'unknown')
         logger.info(f"[WEBHOOK] Type: {update_type}")
         
-        # 🔥 MAX присылает message внутри поля 'message' при update_type='message_created'
         if update_type == 'message_created' and (msg := body.get('message')):
             await handle_max_message(msg)
         
@@ -163,7 +160,6 @@ async def webhook_handler(request):
 
 async def handle_max_message(msg: Dict):
     """Обработка сообщения от пользователя"""
-    # 🔥 Извлекаем данные как в рабочем боте
     inner = msg
     body = inner.get('body', {})
     text = body.get('text', '') or inner.get('text', '')
@@ -175,7 +171,6 @@ async def handle_max_message(msg: Dict):
     
     logger.info(f"[HANDLE] 💬 From {chat_id}: {text[:100] if text else '[empty]'}")
     
-    # Обработка команд
     if text == "/start":
         kb = {"inline_keyboard": [
             [{"text": "➕ Новый пост", "callback_data": "new_post"}],
@@ -224,7 +219,6 @@ async def on_startup(app):
     logger.info("🚀 Starting MAX Channel Poster (Webhook mode)")
     api_session = ClientSession()
     
-    # 🔥 Авто-регистрация вебхука при старте
     if RENDER_EXTERNAL_URL and CHANNEL_ID:
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
         await register_webhook(webhook_url)
