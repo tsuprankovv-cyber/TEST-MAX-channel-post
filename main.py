@@ -1,5 +1,5 @@
 """
-MAX Channel Poster Bot — FULL FEATURE VERSION v2.4
+MAX Channel Poster Bot — FULL FEATURE VERSION v2.5
 ✅ Авторизация по паролю (сохранение в файл, до смены пароля)
 ✅ Медиа: фото/видео/аудио/голосовые/документы/коллажи/ссылки (до 10 файлов)
 ✅ Форматирование: сохранение markup + конвертация в HTML для предпросмотра
@@ -12,8 +12,8 @@ MAX Channel Poster Bot — FULL FEATURE VERSION v2.4
 ✅ Inline-меню (max:// ссылки)
 ✅ Очистка временных файлов
 ✅ 🔥🔥🔥 МАКСИМАЛЬНОЕ ЛОГИРОВАНИЕ НА КАЖДОМ ШАГЕ 🔥🔥🔥
-🔧 FIX: file_ bytes → file_ bytes (синтаксис)
-🔧 FIX: if  → if data is not None: (синтаксис)
+🔧 FIX: file_data: bytes — аннотации типов исправлены
+🔧 FIX: if data is not None — синтаксис исправлен
 🔧 FIX: Унифицирована передача кнопок (inline_keyboard → плоский список)
 🔧 FIX: Сохранение сессии и очистка после публикации
 🔧 FIX: Корректная обработка attachments и markup
@@ -200,7 +200,7 @@ class StateManager:
             logger.debug(f"[STATE] 🆕 Created session for user {user_id}")
         return self.sessions[user_id]
     
-    def set_step(self, user_id: int, step: str,  Dict = None):
+    def set_step(self, user_id: int, step: str, data: Optional[Dict] = None):
         """Устанавливает шаг в сессии"""
         session = self.get_session(user_id)
         session['step'] = step
@@ -238,7 +238,7 @@ class StateManager:
             logger.info(f"[STATE] 🗑️ Draft cleared for user {user_id}")
             del self.drafts[user_id]
     
-    def list_drafts(self, user_id: int = None) -> List[Dict]:
+    def list_drafts(self, user_id: Optional[int] = None) -> List[Dict]:
         """Возвращает список черновиков"""
         if user_id is not None:
             return [self.drafts[user_id]] if user_id in self.drafts else []
@@ -272,8 +272,8 @@ class MAXClient:
             await self.session.close()
             logger.info("[MAX] 🔌 HTTP session closed")
     
-    async def _request(self, method: str, endpoint: str,  Dict = None, 
-                       params: Dict = None, files: Dict = None, 
+    async def _request(self, method: str, endpoint: str, data: Optional[Dict] = None, 
+                       params: Optional[Dict] = None, files: Optional[Dict] = None, 
                        max_retries: int = 3) -> Dict:
         """Универсальный запрос с логированием и повторами"""
         await self.init()
@@ -377,8 +377,8 @@ class MAXClient:
     # === API методы ===
     
     async def send_message(self, chat_id: Union[str, int], text: str, 
-                          buttons: List[Dict] = None, markup: List[Dict] = None,
-                          attachments: List[Dict] = None) -> Dict:
+                          buttons: Optional[List[Dict]] = None, markup: Optional[List[Dict]] = None,
+                          attachments: Optional[List[Dict]] = None) -> Dict:
         """Отправляет сообщение пользователю или в канал"""
         logger.info(f"[MAX] 📤 send_message(chat_id={chat_id}, text_len={len(text)}, buttons={len(buttons) if buttons else 0})")
         
@@ -404,8 +404,8 @@ class MAXClient:
         endpoint = f"/messages?chat_id={chat_id}"
         return await self._request("POST", endpoint, data=payload)
     
-    async def edit_message(self, message_id: str, text: str = None,
-                          buttons: List[Dict] = None, markup: List[Dict] = None) -> Dict:
+    async def edit_message(self, message_id: str, text: Optional[str] = None,
+                          buttons: Optional[List[Dict]] = None, markup: Optional[List[Dict]] = None) -> Dict:
         """Редактирует опубликованное сообщение"""
         logger.info(f"[MAX] ✏️ edit_message(message_id={message_id})")
         
@@ -444,7 +444,7 @@ class MAXClient:
         logger.info(f"[MAX] {'✅' if success else '❌'} Webhook registration: {result}")
         return success
     
-    async def upload_media(self, file_ bytes, filename: str, 
+    async def upload_media(self, file_data: bytes, filename: str, 
                           media_type: str = 'photo') -> Dict:
         """Загружает медиафайл и возвращает данные для attachments"""
         logger.info(f"[MAX] 📤 upload_media(filename={filename}, type={media_type}, size={len(file_data)}B)")
@@ -475,11 +475,11 @@ class MediaManager:
         self.media_cache: Dict[str, Dict] = {}
         logger.info(f"[MEDIA] 🖼 MediaManager initialized | cache_dir={cache_dir} | max_items={max_items}")
     
-    def _generate_hash(self, file_ bytes) -> str:
+    def _generate_hash(self, file_data: bytes) -> str:
         """Генерирует хэш файла"""
         return hashlib.sha256(file_data).hexdigest()[:16]
     
-    async def download_and_cache(self, url: str, filename: str = None) -> Optional[Dict]:
+    async def download_and_cache(self, url: str, filename: Optional[str] = None) -> Optional[Dict]:
         """Скачивает файл по URL и кэширует его"""
         logger.info(f"[MEDIA] 📥 download_and_cache(url={url[:100]}..., filename={filename})")
         
@@ -534,7 +534,7 @@ class MediaManager:
                 return cache_path.read_bytes()
         return None
     
-    def cleanup_old_cache(self, max_age_hours: int = None):
+    def cleanup_old_cache(self, max_age_hours: Optional[int] = None):
         """Удаляет старые файлы из кэша"""
         if max_age_hours is None:
             max_age_hours = CACHE_MAX_AGE_HOURS
@@ -773,7 +773,7 @@ class PublishScheduler:
                 continue
         return None
     
-    def schedule_post(self, user_id: int, post_ Dict, publish_at: str) -> Optional[str]:
+    def schedule_post(self, user_id: int, post_data: Dict, publish_at: str) -> Optional[str]:
         """Планирует публикацию поста"""
         logger.info(f"[SCHEDULER] 📅 schedule_post(user_id={user_id}, publish_at={publish_at})")
         
@@ -817,7 +817,7 @@ class PublishScheduler:
         logger.info(f"[SCHEDULER] ✅ Post scheduled: job_id={job_id} | publish_at={publish_time}")
         return job_id
     
-    def list_scheduled(self, user_id: int = None) -> List[Dict]:
+    def list_scheduled(self, user_id: Optional[int] = None) -> List[Dict]:
         """Возвращает список запланированных постов"""
         result = []
         for job_id, data in self.scheduled_posts.items():
@@ -919,7 +919,7 @@ class StatsCollector:
         self._save_to_file()
         logger.info(f"[STATS] 🖱 Click recorded: message={message_id} button={button_index} user={user_id}")
     
-    def get_stats(self, message_id: str = None) -> Union[Dict, List[Dict]]:
+    def get_stats(self, message_id: Optional[str] = None) -> Union[Dict, List[Dict]]:
         """Возвращает статистику"""
         if message_id is not None:
             result = self.stats.get(message_id, {}).copy()
@@ -1358,7 +1358,7 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
     logger.info(f"[MSG] 👤 user_id={user_id} | reply_chat_id={chat_id_for_reply}")
     
     # 🔧 Создаём колбэк для отправки ответа — ИСПРАВЛЕНО
-    async def send_callback(text: str, keyboard: Dict = None):
+    async def send_callback(text: str, keyboard: Optional[Dict] = None):
         # 🔧 Извлекаем кнопки из keyboard или используем buttons напрямую
         buttons = None
         if keyboard is not None:
@@ -1436,7 +1436,7 @@ async def handle_incoming_message(msg: Dict, handlers: CommandHandlers, send_cal
 # 🌐 WEB SERVER
 # ===================================================================
 async def health_check(request):
-    return web.json_response({"ok": True, "status": "running", "version": "2.4.0-full"})
+    return web.json_response({"ok": True, "status": "running", "version": "2.5.0-full"})
 
 async def root_handler(request):
     return web.json_response({
@@ -1448,7 +1448,7 @@ async def root_handler(request):
 
 async def on_startup(app):
     logger.info("🚀" * 40)
-    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT — FULL FEATURE v2.4")
+    logger.info("🚀 STARTING MAX CHANNEL POSTER BOT — FULL FEATURE v2.5")
     logger.info("🚀" * 40)
     
     # Инициализируем компоненты
