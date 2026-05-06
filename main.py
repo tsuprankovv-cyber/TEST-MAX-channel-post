@@ -1,12 +1,10 @@
 """
-MAX Channel Poster Bot — FULL REWORK v7.0
+MAX Channel Poster Bot — STABLE v7.1
+🔥 format=html (единственный рабочий вариант)
+🔥 markup → HTML конвертация
+🔥 Единый предпросмотр (одно сообщение)
+🔥 /skip и /cancel на каждом шаге
 🔥 Пошаговый алгоритм: фото → текст → кнопки → предпросмотр
-🔥 Перебор 5 вариантов форматирования
-🔥 Единый предпросмотр (фото+текст+кнопки в одном сообщении)
-🔥 Умное меню редактирования
-🔥 /skip и /cancel на каждом этапе
-🔥 Опциональный пароль (REQUIRE_PASSWORD)
-🔥 Максимальное логирование
 """
 import asyncio
 import logging
@@ -48,14 +46,6 @@ STATS_FILE = DATA_DIR / 'stats.json'
 MEDIA_CACHE_DIR = DATA_DIR / 'media_cache'
 MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Форматы форматирования для перебора
-FORMAT_VARIANTS = [
-    "markup_entities",   # markup как entities (текущий)
-    "format_html",       # "format": "html" + HTML теги
-    "format_markdown",   # "format": "markdown" + Markdown
-]
-
-# Логирование
 log_file = DATA_DIR / 'bot.log'
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.DEBUG),
@@ -70,232 +60,144 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 logger.info("=" * 80)
-logger.info(f"🚀 MAX CHANNEL POSTER v7.0 — FULL REWORK")
+logger.info(f"🚀 MAX CHANNEL POSTER v7.1 — STABLE")
 logger.info(f"🔧 CHANNEL_ID={CHANNEL_ID}")
 logger.info(f"🔧 REQUIRE_PASSWORD={REQUIRE_PASSWORD}")
-logger.info(f"🔧 FORMAT_VARIANTS={FORMAT_VARIANTS}")
-logger.info(f"🔧 LOG_LEVEL={LOG_LEVEL}")
+logger.info(f"🔧 FORMAT=html (единственный рабочий)")
 logger.info("=" * 80)
 
 # ===================================================================
-# 🎨 FORMATTING ENGINE (5 ВАРИАНТОВ + ПЕРЕБОР)
+# 🎨 MARKUP → HTML КОНВЕРТЕР
 # ===================================================================
-class FormattingEngine:
-    """
-    Перебирает варианты форматирования.
-    🔥 Пробует все варианты, логирует каждый.
-    """
+def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
+    """Корректирует UTF-16 offset → Python offset"""
+    if not markup:
+        return []
     
-    @staticmethod
-    def correct_markup_offsets(text: str, markup: List[Dict]) -> List[Dict]:
-        """Корректирует UTF-16 offset → Python offset"""
-        if not markup:
-            return []
+    corrected = []
+    for entity in markup:
+        entity = entity.copy()
+        max_offset = entity.get('from', 0)
+        max_length = entity.get('length', 0)
         
-        logger.debug(f"[FORMAT-OFFSET] Correcting {len(markup)} entities")
-        corrected = []
-        
-        for idx, entity in enumerate(markup):
-            entity = entity.copy()
-            max_offset = entity.get('from', 0)
-            max_length = entity.get('length', 0)
-            
-            python_offset = 0
-            utf16_pos = 0
-            for i, char in enumerate(text):
-                if utf16_pos >= max_offset:
-                    python_offset = i
-                    break
-                utf16_pos += len(char.encode('utf-16-le')) // 2
-            else:
-                python_offset = len(text)
-            
-            python_length = 0
-            utf16_pos = max_offset
-            for i in range(python_offset, len(text)):
-                if utf16_pos >= max_offset + max_length:
-                    break
-                utf16_pos += len(text[i].encode('utf-16-le')) // 2
-                python_length += 1
-            
-            entity['from'] = python_offset
-            entity['length'] = python_length
-            corrected.append(entity)
-            
-            logger.debug(f"[FORMAT-OFFSET] [{idx}] {entity.get('type')}: [{max_offset}:{max_offset+max_length}] → [{python_offset}:{python_offset+python_length}]")
-        
-        return corrected
-    
-    @staticmethod
-    def markup_to_html(text: str, markup: List[Dict]) -> str:
-        """Конвертирует markup entities в HTML теги"""
-        if not markup:
-            return text
-        
-        logger.info(f"[FORMAT-HTML] Converting {len(markup)} entities to HTML")
-        
-        tag_map = {
-            "strong": "b", "bold": "b",
-            "emphasized": "i", "italic": "i", "em": "i",
-            "underline": "u",
-            "strikethrough": "s", "strike": "s",
-            "code": "code",
-            "link": "a", "text_link": "a",
-        }
-        
-        corrected = FormattingEngine.correct_markup_offsets(text, markup)
-        sorted_markup = sorted(corrected, key=lambda m: (m.get('from', 0), -m.get('length', 0)))
-        
-        # Строим карту тегов
-        tag_starts = {}
-        tag_ends = {}
-        
-        for entity in sorted_markup:
-            offset = entity.get('from', 0)
-            length = entity.get('length', 0)
-            etype = entity.get('type', '')
-            
-            if etype not in tag_map:
-                continue
-            
-            tag_name = tag_map[etype]
-            
-            if etype in ('link', 'text_link', 'url'):
-                url = entity.get('url', '').replace('"', '&quot;')
-                open_tag = f'<{tag_name} href="{url}">' if url else f'<{tag_name}>'
-            else:
-                open_tag = f'<{tag_name}>'
-            
-            close_tag = f'</{tag_name}>'
-            
-            if offset not in tag_starts:
-                tag_starts[offset] = []
-            tag_starts[offset].append(open_tag)
-            
-            end_pos = offset + length
-            if end_pos not in tag_ends:
-                tag_ends[end_pos] = []
-            tag_ends[end_pos].append(close_tag)
-        
-        # Собираем HTML
-        result = []
+        # UTF-16 → Python offset
+        python_offset = 0
+        utf16_pos = 0
         for i, char in enumerate(text):
-            if i in tag_ends:
-                for tag in tag_ends[i]:
-                    result.append(tag)
-            if i in tag_starts:
-                for tag in tag_starts[i]:
-                    result.append(tag)
-            result.append(char)
+            if utf16_pos >= max_offset:
+                python_offset = i
+                break
+            utf16_pos += len(char.encode('utf-16-le')) // 2
+        else:
+            python_offset = len(text)
         
-        last_pos = len(text)
-        if last_pos in tag_ends:
-            for tag in tag_ends[last_pos]:
-                result.append(tag)
+        # UTF-16 → Python length
+        python_length = 0
+        utf16_pos = max_offset
+        for i in range(python_offset, len(text)):
+            if utf16_pos >= max_offset + max_length:
+                break
+            utf16_pos += len(text[i].encode('utf-16-le')) // 2
+            python_length += 1
         
-        final = ''.join(result)
-        logger.info(f"[FORMAT-HTML] Output: '{final[:150]}...'")
-        return final
+        entity['from'] = python_offset
+        entity['length'] = python_length
+        corrected.append(entity)
     
-    @staticmethod
-    def markup_to_markdown(text: str, markup: List[Dict]) -> str:
-        """Конвертирует markup entities в Markdown"""
-        if not markup:
-            return text
-        
-        logger.info(f"[FORMAT-MD] Converting {len(markup)} entities to Markdown")
-        
-        md_map = {
-            "strong": "**", "bold": "**",
-            "emphasized": "*", "italic": "*", "em": "*",
-            "underline": "++",
-            "strikethrough": "~~", "strike": "~~",
-            "code": "`",
-        }
-        
-        corrected = FormattingEngine.correct_markup_offsets(text, markup)
-        sorted_markup = sorted(corrected, key=lambda m: (m.get('from', 0), -m.get('length', 0)))
-        
-        # Вставка маркеров
-        result = []
-        last_pos = 0
-        
-        for entity in sorted_markup:
-            offset = entity.get('from', 0)
-            length = entity.get('length', 0)
-            etype = entity.get('type', '')
-            
-            if etype in ('link', 'text_link', 'url'):
-                url = entity.get('url', '')
-                marker_open = '['
-                marker_close = f']({url})'
-            elif etype in md_map:
-                marker_open = md_map[etype]
-                marker_close = md_map[etype]
-            else:
+    return corrected
+
+
+def markup_to_html(text: str, markup: List[Dict]) -> str:
+    """
+    Конвертирует MAX markup entities в HTML теги.
+    🔥 Единственный рабочий формат для MAX API!
+    """
+    if not markup:
+        return text
+    
+    logger.info(f"[MARKUP→HTML] Converting {len(markup)} entities")
+    
+    TAG_MAP = {
+        "strong": "b", "bold": "b",
+        "emphasized": "i", "italic": "i", "em": "i",
+        "underline": "u", "u": "u",
+        "strikethrough": "s", "strike": "s",
+        "code": "code",
+        "spoiler": "tg-spoiler",
+        "link": "a", "text_link": "a",
+    }
+    
+    corrected = correct_markup_offsets(text, markup)
+    sorted_markup = sorted(corrected, key=lambda m: (m.get('from', 0), -m.get('length', 0)))
+    
+    # Фильтруем вложенные сущности одного типа
+    filtered = []
+    for i, entity in enumerate(sorted_markup):
+        etype = entity.get('type', '')
+        offset = entity.get('from', 0)
+        end = offset + entity.get('length', 0)
+        is_nested = False
+        for j, other in enumerate(sorted_markup):
+            if i == j or other.get('type') != etype:
                 continue
-            
-            result.append(text[last_pos:offset])
-            result.append(marker_open)
-            result.append(text[offset:offset+length])
-            result.append(marker_close)
-            last_pos = offset + length
-        
-        result.append(text[last_pos:])
-        final = ''.join(result)
-        logger.info(f"[FORMAT-MD] Output: '{final[:150]}...'")
-        return final
+            other_offset = other.get('from', 0)
+            other_end = other_offset + other.get('length', 0)
+            if other_offset <= offset and other_end >= end and (other_offset < offset or other_end > end):
+                is_nested = True
+                break
+        if not is_nested:
+            filtered.append(entity)
     
-    @staticmethod
-    def build_payload_variants(text: str, markup: List[Dict]) -> List[Dict]:
-        """
-        Создаёт список вариантов payload для перебора.
-        🔥 Возвращает все возможные комбинации!
-        """
-        logger.info(f"[FORMAT-VARIANTS] ========== BUILDING VARIANTS ==========")
-        logger.info(f"[FORMAT-VARIANTS] text='{text[:100]}...'")
-        logger.info(f"[FORMAT-VARIANTS] markup={len(markup) if markup else 0} entities")
+    # Строим карту тегов (открывающие и закрывающие по позициям)
+    tag_starts = {}
+    tag_ends = {}
+    
+    for entity in filtered:
+        offset = entity.get('from', 0)
+        length = entity.get('length', 0)
+        etype = entity.get('type', '')
         
-        variants = []
+        if etype not in TAG_MAP:
+            continue
         
-        # Вариант 1: markup как entities
-        if markup:
-            corrected = FormattingEngine.correct_markup_offsets(text, markup)
-            variants.append({
-                "name": "markup_entities",
-                "payload": {"text": text, "markup": corrected},
-                "log": f"markup entities: {len(corrected)} items"
-            })
+        tag_name = TAG_MAP[etype]
         
-        # Вариант 2: format: html + HTML теги
-        if markup:
-            html_text = FormattingEngine.markup_to_html(text, markup)
-            variants.append({
-                "name": "format_html",
-                "payload": {"text": html_text, "format": "html"},
-                "log": f"format=html, text='{html_text[:100]}...'"
-            })
+        if etype in ('link', 'text_link'):
+            url = entity.get('url', '').replace('"', '&quot;')
+            open_tag = f'<{tag_name} href="{url}">' if url else f'<{tag_name}>'
+        else:
+            open_tag = f'<{tag_name}>'
         
-        # Вариант 3: format: markdown + Markdown
-        if markup:
-            md_text = FormattingEngine.markup_to_markdown(text, markup)
-            variants.append({
-                "name": "format_markdown",
-                "payload": {"text": md_text, "format": "markdown"},
-                "log": f"format=markdown, text='{md_text[:100]}...'"
-            })
+        close_tag = f'</{tag_name}>'
         
-        # Вариант 4: Только текст (без форматирования) — всегда последний
-        variants.append({
-            "name": "plain_text",
-            "payload": {"text": text},
-            "log": "plain text, no formatting"
-        })
+        tag_starts.setdefault(offset, []).append(open_tag)
+        tag_ends.setdefault(offset + length, []).append(close_tag)
         
-        logger.info(f"[FORMAT-VARIANTS] Built {len(variants)} variants: {[v['name'] for v in variants]}")
-        logger.info(f"[FORMAT-VARIANTS] ========== END VARIANTS ==========")
-        
-        return variants
+        logger.debug(f"[MARKUP→HTML] {etype} → <{tag_name}> [{offset}:{offset+length}]")
+    
+    # Собираем HTML
+    result = []
+    for i, char in enumerate(text):
+        # Закрываем теги
+        if i in tag_ends:
+            for tag in tag_ends[i]:
+                result.append(tag)
+        # Открываем теги
+        if i in tag_starts:
+            for tag in tag_starts[i]:
+                result.append(tag)
+        result.append(char)
+    
+    # Закрываем оставшиеся в конце
+    last_pos = len(text)
+    if last_pos in tag_ends:
+        for tag in tag_ends[last_pos]:
+            result.append(tag)
+    
+    final = ''.join(result)
+    logger.info(f"[MARKUP→HTML] Input: '{text[:100]}...'")
+    logger.info(f"[MARKUP→HTML] Output: '{final[:150]}...'")
+    return final
 
 
 # ===================================================================
@@ -309,7 +211,7 @@ class AuthManager:
         self.authorized: Dict[int, Dict] = {}
         self.failed_attempts: Dict[int, int] = {}
         self._load_from_file()
-        logger.info(f"[AUTH] 🔐 Initialized (require_password={require_password}, users={len(self.authorized)})")
+        logger.info(f"[AUTH] 🔐 require_password={require_password}")
     
     def _load_from_file(self):
         if self.auth_file.exists():
@@ -327,7 +229,6 @@ class AuthManager:
                 json.dump({
                     'users': {str(k): v for k, v in self.authorized.items()},
                     'failed': {str(k): v for k, v in self.failed_attempts.items()},
-                    'updated_at': datetime.now().isoformat()
                 }, f, indent=2)
         except Exception:
             pass
@@ -341,9 +242,7 @@ class AuthManager:
         if not self.require_password:
             return True
         if password == self.password:
-            self.authorized[user_id] = {
-                'auth_time': datetime.now().isoformat()
-            }
+            self.authorized[user_id] = {'auth_time': datetime.now().isoformat()}
             self.failed_attempts.pop(user_id, None)
             self._save_to_file()
             return True
@@ -363,19 +262,17 @@ class AuthManager:
         self.password = new_password
         self.authorized.clear()
         self._save_to_file()
-        logger.info(f"[AUTH] 🔑 Password changed")
+        logger.info("[AUTH] 🔑 Password changed")
 
 # ===================================================================
 # 🗄 STATE MODULE
 # ===================================================================
 class StateManager:
-    # Шаги: photo → text → buttons → preview
     STEPS = ['post_waiting_photo', 'post_waiting_text', 'post_waiting_buttons', 'post_ready']
     
     def __init__(self):
         self.sessions: Dict[int, Dict] = {}
         self.drafts: Dict[int, Dict] = {}
-        logger.info("[STATE] 🗄 Initialized")
     
     def get_session(self, user_id: int) -> Dict:
         if user_id not in self.sessions:
@@ -388,7 +285,7 @@ class StateManager:
         session['step'] = step
         if data is not None:
             session['data'].update(data)
-        logger.info(f"[STATE] 📍 User {user_id}: {old} → {step} | data_keys={list(session['data'].keys())}")
+        logger.info(f"[STATE] 📍 {user_id}: {old} → {step}")
     
     def get_step(self, user_id: int) -> Optional[str]:
         return self.sessions.get(user_id, {}).get('step')
@@ -399,12 +296,12 @@ class StateManager:
     def clear_session(self, user_id: int):
         if user_id in self.sessions:
             del self.sessions[user_id]
-            logger.info(f"[STATE] 🧹 Session cleared for {user_id}")
+            logger.info(f"[STATE] 🧹 Session cleared {user_id}")
     
     def save_draft(self, user_id: int, draft: Dict):
         draft['saved_at'] = datetime.now().isoformat()
         self.drafts[user_id] = draft
-        logger.info(f"[STATE] 💾 Draft saved for {user_id} | keys={list(draft.keys())} | has_photo={bool(draft.get('attachments'))} | has_text={bool(draft.get('text'))} | has_buttons={bool(draft.get('buttons'))}")
+        logger.info(f"[STATE] 💾 Draft saved {user_id} | photo={bool(draft.get('attachments'))} text={bool(draft.get('text'))} buttons={bool(draft.get('buttons'))}")
     
     def get_draft(self, user_id: int) -> Optional[Dict]:
         return self.drafts.get(user_id)
@@ -412,7 +309,7 @@ class StateManager:
     def clear_draft(self, user_id: int):
         if user_id in self.drafts:
             del self.drafts[user_id]
-            logger.info(f"[STATE] 🗑️ Draft cleared for {user_id}")
+            logger.info(f"[STATE] 🗑️ Draft cleared {user_id}")
 
 # ===================================================================
 # 📡 MAX API CLIENT
@@ -424,8 +321,7 @@ class MAXClient:
         self.timeout = ClientTimeout(total=timeout, connect=10, sock_read=timeout)
         self.session: Optional[ClientSession] = None
         self.request_count = 0
-        self.formatter = FormattingEngine()
-        logger.info(f"[MAX] 📡 Client initialized | base_url={base_url}")
+        logger.info(f"[MAX] 📡 Client initialized")
     
     async def init(self):
         if self.session is None:
@@ -435,151 +331,64 @@ class MAXClient:
         if self.session is not None:
             await self.session.close()
     
-    async def _request(self, method: str, endpoint: str, data: Optional[Dict] = None, 
-                       max_retries: int = 3) -> Dict:
+    async def _request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict:
         await self.init()
         
         headers = {
             "Authorization": self.token,
             "Content-Type": "application/json",
-            "User-Agent": "MAX-Channel-Poster/7.0"
+            "User-Agent": "MAX-Channel-Poster/7.1"
         }
         
         url = f"{self.base_url}{endpoint}"
         self.request_count += 1
         
         logger.info(f"[MAX] ▶️ #{self.request_count} {method} {url}")
-        logger.info(f"[MAX] 📤 BODY: {json.dumps(data, ensure_ascii=False)[:800] if data else 'None'}")
+        logger.info(f"[MAX] 📤 BODY: {json.dumps(data, ensure_ascii=False)[:600] if data else 'None'}")
         
-        for attempt in range(max_retries):
-            try:
-                start = time.time()
-                async with self.session.request(
-                    method=method, url=url, headers=headers,
-                    json=data, timeout=self.timeout
-                ) as response:
-                    elapsed = time.time() - start
-                    text = await response.text()
-                    
-                    logger.info(f"[MAX] ◀️ #{self.request_count}: {response.status} in {elapsed:.2f}s")
-                    logger.info(f"[MAX] 📥 RESPONSE: {text[:800]}")
-                    
-                    if response.status == 200:
-                        try:
-                            result = json.loads(text) if text.strip() else {}
-                            # Проверяем наличие форматирования в ответе
-                            resp_body = result.get('message', {}).get('body', {})
-                            resp_markup = resp_body.get('markup')
-                            resp_text = resp_body.get('text', '')
-                            logger.info(f"[MAX] 📥 Response has markup: {resp_markup is not None}")
-                            logger.info(f"[MAX] 📥 Response text: '{resp_text[:100]}...'")
-                            return result
-                        except json.JSONDecodeError:
-                            return {"raw": text}
-                    
-                    if response.status == 400:
-                        logger.warning(f"[MAX] ⚠️ Bad Request: {text[:300]}")
-                        return {"error": "HTTP_400", "detail": text}
-                    
-                    if response.status == 429:
-                        retry_after = int(response.headers.get('Retry-After', 30))
-                        logger.warning(f"[MAX] ⏳ Rate limit, waiting {retry_after}s")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    
-                    return {"error": f"HTTP_{response.status}", "detail": text}
-                    
-            except asyncio.TimeoutError:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                return {"error": "timeout"}
-            except Exception as e:
-                logger.error(f"[MAX] 💥 Exception: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                return {"error": "exception", "detail": str(e)}
-        
-        return {"error": "max_retries_exceeded"}
+        try:
+            start = time.time()
+            async with self.session.request(
+                method=method, url=url, headers=headers,
+                json=data, timeout=self.timeout
+            ) as response:
+                elapsed = time.time() - start
+                text = await response.text()
+                
+                logger.info(f"[MAX] ◀️ #{self.request_count}: {response.status} in {elapsed:.2f}s")
+                logger.info(f"[MAX] 📥 RESPONSE: {text[:600]}")
+                
+                if response.status == 200:
+                    try:
+                        result = json.loads(text) if text.strip() else {}
+                        resp_body = result.get('message', {}).get('body', {})
+                        logger.info(f"[MAX] 📥 markup={bool(resp_body.get('markup'))} text='{resp_body.get('text', '')[:80]}...'")
+                        return result
+                    except json.JSONDecodeError:
+                        return {"raw": text}
+                
+                return {"error": f"HTTP_{response.status}", "detail": text}
+                
+        except Exception as e:
+            logger.error(f"[MAX] 💥 {e}")
+            return {"error": "exception", "detail": str(e)}
     
-    async def send_message_with_format_retry(self, chat_id, text, markup=None, 
-                                             buttons=None, attachments=None) -> Dict:
+    # 🔥 ЕДИНЫЙ МЕТОД ОТПРАВКИ (format=html)
+    async def send_message(self, chat_id: Union[str, int], text: str, 
+                          buttons: Optional[List[List[Dict]]] = None,
+                          attachments: Optional[List[Dict]] = None,
+                          use_html_format: bool = False) -> Dict:
         """
-        Отправляет сообщение с перебором вариантов форматирования.
-        🔥 Если markup не применился — пробует следующий вариант!
+        Отправляет сообщение в MAX.
+        🔥 use_html_format=True → добавляет "format": "html"
         """
-        logger.info(f"[MAX-FORMAT] ========== FORMAT RETRY ==========")
-        logger.info(f"[MAX-FORMAT] chat_id={chat_id}, text='{text[:80]}...', markup={len(markup) if markup else 0}")
-        
-        # Если нет markup — отправляем как есть
-        if not markup:
-            logger.info(f"[MAX-FORMAT] No markup, sending as plain text")
-            return await self.send_message(chat_id, text, buttons=buttons, attachments=attachments)
-        
-        # Строим варианты
-        variants = self.formatter.build_payload_variants(text, markup)
-        
-        # Перебираем варианты
-        for idx, variant in enumerate(variants):
-            logger.info(f"[MAX-FORMAT] 🔄 Trying variant {idx+1}/{len(variants)}: {variant['name']}")
-            logger.info(f"[MAX-FORMAT] {variant['log']}")
-            
-            payload = variant['payload'].copy()
-            
-            # Добавляем кнопки и вложения
-            all_attachments = []
-            if attachments:
-                all_attachments.extend(attachments)
-            if buttons and len(buttons) > 0:
-                all_attachments.append({
-                    "type": "inline_keyboard",
-                    "payload": {"buttons": buttons}
-                })
-            if all_attachments:
-                payload['attachments'] = all_attachments
-            
-            logger.info(f"[MAX-FORMAT] Payload keys: {list(payload.keys())}")
-            
-            result = await self._request("POST", f"/messages?chat_id={chat_id}", data=payload)
-            
-            if "error" in result:
-                logger.warning(f"[MAX-FORMAT] ❌ Variant {variant['name']} failed: {result.get('detail', '')[:200]}")
-                continue
-            
-            # Проверяем, применилось ли форматирование
-            resp_body = result.get('message', {}).get('body', {})
-            resp_markup = resp_body.get('markup')
-            resp_text = resp_body.get('text', '')
-            
-            if resp_markup:
-                logger.info(f"[MAX-FORMAT] ✅ Variant {variant['name']} SUCCESS! Markup applied: {len(resp_markup)} entities")
-                return result
-            
-            if variant['name'] == 'format_html' and '<' in resp_text and '>' in resp_text:
-                logger.info(f"[MAX-FORMAT] ✅ Variant {variant['name']} SUCCESS! HTML tags in response")
-                return result
-            
-            if variant['name'] == 'format_markdown' and ('**' in resp_text or '*' in resp_text):
-                logger.info(f"[MAX-FORMAT] ✅ Variant {variant['name']} SUCCESS! Markdown in response")
-                return result
-            
-            logger.info(f"[MAX-FORMAT] ⚠️ Variant {variant['name']} sent but no formatting detected in response, trying next...")
-        
-        # Если ни один не сработал — возвращаем последний результат
-        logger.warning(f"[MAX-FORMAT] ❌ All variants tried, returning last result")
-        return result if 'result' in dir() else {"error": "all_variants_failed"}
-    
-    async def send_message(self, chat_id, text, markup=None, buttons=None, attachments=None, 
-                          skip_format_retry=False) -> Dict:
-        """Отправляет сообщение (без перебора форматирования)"""
         logger.info(f"[MAX-SEND] ========== SENDING ==========")
-        logger.info(f"[MAX-SEND] chat_id={chat_id}, text='{text[:80]}...', buttons={'YES' if buttons else 'NO'}, attachments={len(attachments) if attachments else 0}")
+        logger.info(f"[MAX-SEND] chat_id={chat_id} text='{text[:80]}...' buttons={'YES' if buttons else 'NO'} attachments={len(attachments) if attachments else 0} html={use_html_format}")
         
         payload = {"text": text}
         
-        if markup:
-            payload["markup"] = markup
+        if use_html_format:
+            payload["format"] = "html"
         
         all_attachments = []
         if attachments:
@@ -589,11 +398,12 @@ class MAXClient:
                 "type": "inline_keyboard",
                 "payload": {"buttons": buttons}
             })
-            logger.info(f"[MAX-SEND] 🔘 Adding keyboard: {len(buttons)} rows")
+            logger.info(f"[MAX-SEND] 🔘 Keyboard: {len(buttons)} rows")
+        
         if all_attachments:
             payload["attachments"] = all_attachments
         
-        logger.info(f"[MAX-SEND] Final keys: {list(payload.keys())}")
+        logger.info(f"[MAX-SEND] Keys: {list(payload.keys())}")
         
         endpoint = f"/messages?chat_id={chat_id}"
         result = await self._request("POST", endpoint, data=payload)
@@ -620,40 +430,32 @@ class MediaManager:
     
     def parse_attachments(self, attachments: List[Dict]) -> List[Dict]:
         """Парсит вложения, сохраняя оригинальный payload"""
-        logger.info(f"[MEDIA] 🔍 Parsing {len(attachments)} attachments")
+        logger.info(f"[MEDIA] Parsing {len(attachments)} attachments")
         result = []
-        
         for i, att in enumerate(attachments):
             if not isinstance(att, dict):
                 continue
-            
             att_type = att.get('type', '')
             payload = att.get('payload', {})
-            
             if att_type in ('image', 'photo', 'video', 'audio', 'voice', 'document', 'file', 'share'):
-                parsed = {
+                result.append({
                     'type': att_type,
                     'payload': payload.copy(),
                     'url': payload.get('url', ''),
                     'filename': payload.get('filename', f'file_{i}'),
                     'index': i
-                }
-                result.append(parsed)
-                logger.info(f"[MEDIA] [{i}] ✅ type={att_type}")
-        
-        logger.info(f"[MEDIA] ✅ Parsed {len(result)}/{len(attachments)} items")
+                })
+                logger.info(f"[MEDIA] [{i}] ✅ {att_type}")
+        logger.info(f"[MEDIA] ✅ {len(result)}/{len(attachments)}")
         return result
 
 # ===================================================================
-# 📊 STATS MODULE
+# 📊 STATS
 # ===================================================================
 class StatsCollector:
     def __init__(self, stats_file: Path):
         self.stats_file = stats_file
         self.stats: Dict[str, Dict] = {}
-        self._load()
-    
-    def _load(self):
         if self.stats_file.exists():
             try:
                 with open(self.stats_file, 'r', encoding='utf-8') as f:
@@ -664,17 +466,12 @@ class StatsCollector:
     def _save(self):
         try:
             with open(self.stats_file, 'w', encoding='utf-8') as f:
-                json.dump({'messages': self.stats, 'updated_at': datetime.now().isoformat()}, f, indent=2)
+                json.dump({'messages': self.stats}, f, indent=2)
         except Exception:
             pass
     
     def record_message(self, message_id: str, chat_id: str, text: str, published_at: str):
-        self.stats[message_id] = {
-            'chat_id': chat_id,
-            'text_preview': text[:100],
-            'published_at': published_at,
-            'views': 0
-        }
+        self.stats[message_id] = {'chat_id': chat_id, 'text_preview': text[:100], 'published_at': published_at, 'views': 0}
         self._save()
     
     def get_stats(self, message_id=None):
@@ -698,8 +495,7 @@ class PublishScheduler:
         self.scheduler.shutdown()
     
     def parse_datetime(self, dt_str: str) -> Optional[datetime]:
-        formats = ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"]
-        for fmt in formats:
+        for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"]:
             try:
                 return datetime.strptime(dt_str.strip(), fmt)
             except ValueError:
@@ -714,12 +510,12 @@ class PublishScheduler:
         job_id = f"post_{user_id}_{int(time.time())}"
         
         async def job():
-            await self.max_client.send_message_with_format_retry(
+            await self.max_client.send_message(
                 chat_id=self.channel_id,
                 text=draft.get('text', ''),
-                markup=draft.get('markup'),
                 buttons=draft.get('buttons'),
-                attachments=draft.get('attachments')
+                attachments=draft.get('attachments'),
+                use_html_format=True
             )
         
         trigger = DateTrigger(run_date=publish_time)
@@ -739,20 +535,11 @@ class CommandHandlers:
         self.stats = stats
         self.channel_id = channel_id
     
-    # ========== ВСПОМОГАТЕЛЬНЫЕ ==========
-    
-    def _help_text(self) -> str:
-        return (
-            "📝 /post — создать пост\n"
-            "👁 /preview — предпросмотр\n"
-            "📊 /stats — статистика\n"
-            "⚙️ /settings — настройки\n"
-            "❌ /cancel — сброс"
-        )
+    def _help(self) -> str:
+        return "📝 /post — создать пост\n👁 /preview — предпросмотр\n📊 /stats — статистика\n⚙️ /settings — настройки\n❌ /cancel — сброс"
     
     def parse_buttons(self, text: str) -> List[List[Dict]]:
         """Парсит URL-кнопки: Название | url"""
-        logger.info(f"[BTN-PARSE] Input: '{text[:200]}...'")
         rows = []
         for line in text.strip().split('\n'):
             line = line.strip()
@@ -765,352 +552,275 @@ class CommandHandlers:
                     btn_url = parts[1].strip()
                     if btn_text and btn_url.startswith(('http://', 'https://')):
                         rows.append([{"type": "link", "text": btn_text, "url": btn_url}])
-                        logger.info(f"[BTN-PARSE] ✅ '{btn_text}'")
+                        logger.info(f"[BTN] ✅ '{btn_text}'")
                         break
-        logger.info(f"[BTN-PARSE] Total: {len(rows)} rows")
         return rows
     
     # ========== СТАРТ ==========
     
-    async def handle_start(self, user_id, chat_id, send_callback):
+    async def handle_start(self, user_id, chat_id, send):
         logger.info(f"[CMD] /start user={user_id}")
-        
         if self.auth.require_password and not self.auth.is_authorized(user_id):
-            await send_callback("🔐 Введите пароль:")
+            await send("🔐 Введите пароль:")
             self.state.set_step(user_id, 'waiting_password')
             return
-        
         self.state.clear_session(user_id)
-        
-        await send_callback(
-            f"👋 MAX Channel Poster\n\n{self._help_text()}"
-        )
+        await send(f"👋 MAX Channel Poster\n\n{self._help()}")
     
-    async def handle_password(self, user_id, password, send_callback):
+    async def handle_password(self, user_id, password, send):
         if self.auth.check_password(user_id, password):
             self.auth.reset_failed_attempts(user_id)
             session = self.state.get_session(user_id)
-            chat_id = session.get('chat_id', user_id)
-            await self.handle_start(user_id, chat_id, send_callback)
+            await self.handle_start(user_id, session.get('chat_id', user_id), send)
         else:
-            attempts = self.auth.get_failed_attempts(user_id)
-            remaining = 3 - attempts
-            if remaining > 0:
-                await send_callback(f"❌ Неверный пароль. Осталось: {remaining}")
-            else:
-                await send_callback("🔒 Слишком много попыток.")
+            remaining = 3 - self.auth.get_failed_attempts(user_id)
+            await send(f"❌ Неверный пароль. Осталось: {remaining}" if remaining > 0 else "🔒 Заблокировано.")
     
     # ========== ШАГ 1: ФОТО ==========
     
-    async def handle_post_command(self, user_id, send_callback):
-        logger.info(f"[CMD] /post user={user_id}")
-        
+    async def handle_post_command(self, user_id, send):
         if not self.auth.is_authorized(user_id):
-            await send_callback("🔐 Сначала /start")
+            await send("🔐 /start")
             return
-        
         self.state.clear_session(user_id)
         self.state.set_step(user_id, 'post_waiting_photo')
-        
-        await send_callback(
-            "📸 Шаг 1/3: Отправьте фото/видео\n\n"
-            "Или:\n"
-            "⏭ /skip — пропустить\n"
-            "❌ /cancel — отмена"
-        )
+        await send("📸 Шаг 1/3: Отправьте фото/видео\n⏭ /skip | ❌ /cancel")
     
-    async def handle_post_photo(self, user_id, raw_attachments, send_callback):
-        logger.info(f"[CMD-PHOTO] Received {len(raw_attachments)} attachments")
-        
+    async def handle_post_photo(self, user_id, raw_attachments, send):
+        logger.info(f"[PHOTO] {len(raw_attachments)} attachments")
         session = self.state.get_session_data(user_id)
-        
         attachments = self.media_mgr.parse_attachments(raw_attachments)
         session['raw_attachments'] = raw_attachments
         session['attachments'] = attachments
-        
         self.state.set_step(user_id, 'post_waiting_text')
-        
-        await send_callback(
-            f"✅ Фото получено ({len(attachments)} шт.)\n\n"
-            f"📝 Шаг 2/3: Напишите текст\n\n"
-            f"⏭ /skip — пропустить\n"
-            f"❌ /cancel — отмена"
-        )
+        await send(f"✅ Фото ({len(attachments)} шт.)\n📝 Шаг 2/3: Напишите текст\n⏭ /skip | ❌ /cancel")
     
     # ========== ШАГ 2: ТЕКСТ ==========
     
-    async def handle_post_text(self, user_id, text, markup, raw_attachments, send_callback):
-        logger.info(f"[CMD-TEXT] ========== TEXT ==========")
-        logger.info(f"[CMD-TEXT] text='{text[:100]}...'")
-        logger.info(f"[CMD-TEXT] markup={len(markup) if markup else 0} entities")
-        
+    async def handle_post_text(self, user_id, text, markup, raw_attachments, send):
+        logger.info(f"[TEXT] '{text[:80]}...' markup={len(markup) if markup else 0}")
         session = self.state.get_session_data(user_id)
         
-        # Добавляем новые вложения если есть
         if raw_attachments:
-            new_attachments = self.media_mgr.parse_attachments(raw_attachments)
-            existing = session.get('attachments', [])
-            session['attachments'] = existing + new_attachments
+            new = self.media_mgr.parse_attachments(raw_attachments)
+            session['attachments'] = session.get('attachments', []) + new
             session['raw_attachments'] = session.get('raw_attachments', []) + raw_attachments
         
-        # Сохраняем текст и markup
-        session['text'] = text
+        # 🔥 Конвертируем в HTML (format=html)
+        if markup:
+            session['text'] = markup_to_html(text, markup)
+        else:
+            session['text'] = text
+        
+        session['raw_text'] = text
         session['markup'] = markup
         
         self.state.set_step(user_id, 'post_waiting_buttons')
-        
-        await send_callback(
-            f"✅ Текст сохранён\n\n"
-            f"🔘 Шаг 3/3: Добавьте URL-кнопки\n"
-            f"Формат: Название | https://ссылка\n\n"
-            f"⏭ /skip — пропустить\n"
-            f"❌ /cancel — отмена"
-        )
+        await send("✅ Текст сохранён\n🔘 Шаг 3/3: Добавьте URL-кнопки\nФормат: Название | https://ссылка\n⏭ /skip | ❌ /cancel")
     
     # ========== ШАГ 3: КНОПКИ ==========
     
-    async def handle_post_buttons(self, user_id, buttons_text, send_callback):
-        logger.info(f"[CMD-BTN] ========== BUTTONS ==========")
-        logger.info(f"[CMD-BTN] text='{buttons_text[:150]}...'")
-        
+    async def handle_post_buttons(self, user_id, buttons_text, send):
+        logger.info(f"[BTN] '{buttons_text[:100]}...'")
         session = self.state.get_session_data(user_id)
-        
-        buttons = self.parse_buttons(buttons_text)
-        session['buttons'] = buttons
-        
+        session['buttons'] = self.parse_buttons(buttons_text)
         self.state.save_draft(user_id, session.copy())
         self.state.set_step(user_id, 'post_ready')
-        
-        # 🔥 Показываем единый предпросмотр
-        await self.send_preview(user_id, send_callback, session)
+        await self.send_preview(user_id, send, session)
     
     # ========== ПРЕДПРОСМОТР ==========
     
-    async def send_preview(self, user_id, send_callback, draft=None):
-        """Единый предпросмотр: фото + текст + кнопки в ОДНОМ сообщении"""
-        logger.info(f"[PREVIEW] ========== SENDING PREVIEW ==========")
+    async def send_preview(self, user_id, send, draft=None):
+        """🔥 Единый предпросмотр: фото + текст + кнопки в ОДНОМ сообщении"""
+        logger.info("[PREVIEW] ==========")
         
         if draft is None:
             draft = self.state.get_draft(user_id)
-        
         if draft is None:
-            await send_callback("❌ Нет черновика")
+            await send("❌ Нет черновика")
             return
         
         text = draft.get('text', '')
-        markup = draft.get('markup', [])
         buttons = draft.get('buttons', [])
         attachments = draft.get('attachments', [])
         
-        logger.info(f"[PREVIEW] text='{text[:50]}...', markup={len(markup)}, buttons={len(buttons)}, attachments={len(attachments)}")
+        logger.info(f"[PREVIEW] text='{text[:50]}...' buttons={len(buttons)} attachments={len(attachments)}")
         
         chat_id = self.state.get_session(user_id).get('chat_id', user_id)
         
-        # Формируем caption с командами
-        caption = text if text else ""
-        caption += f"\n\n📝 /edit | 🚀 /publish | ❌ /cancel"
-        
-        # Отправляем ОДНО сообщение: фото + текст + кнопки
-        await self.max_client.send_message_with_format_retry(
+        # 🔥 Отправляем ОДНО сообщение
+        await self.max_client.send_message(
             chat_id=chat_id,
-            text=caption if caption else "Предпросмотр",
-            markup=markup,
+            text=text or "Предпросмотр",
             buttons=buttons,
-            attachments=[{
-                'type': att['type'],
-                'payload': att['payload']
-            } for att in attachments if att.get('payload')]
+            attachments=[{'type': a['type'], 'payload': a['payload']} for a in attachments if a.get('payload')],
+            use_html_format=bool(draft.get('markup'))
         )
         
-        logger.info(f"[PREVIEW] ========== END PREVIEW ==========")
+        # Команды ОТДЕЛЬНО
+        await send("📝 /edit | 🚀 /publish | ❌ /cancel")
+        logger.info("[PREVIEW] ==========")
     
-    async def handle_preview(self, user_id, send_callback):
-        await self.send_preview(user_id, send_callback)
+    async def handle_preview(self, user_id, send):
+        await self.send_preview(user_id, send)
     
     # ========== РЕДАКТИРОВАНИЕ ==========
     
-    async def handle_edit(self, user_id, send_callback):
-        logger.info(f"[CMD-EDIT] /edit user={user_id}")
-        
+    async def handle_edit(self, user_id, send):
         draft = self.state.get_draft(user_id)
         if draft is None:
-            await send_callback("❌ Нет черновика. /post — новый пост")
+            await send("❌ Нет черновика. /post")
             return
         
-        # Показываем меню редактирования
-        has_photo = bool(draft.get('attachments'))
-        has_text = bool(draft.get('text'))
-        has_buttons = bool(draft.get('buttons'))
-        
         menu = ["✏️ Что редактируем?\n"]
-        
-        if has_photo:
+        if draft.get('attachments'):
             menu.append("🖼 /edit_photo — фото")
-        if has_text:
+        if draft.get('text'):
             menu.append("📝 /edit_text — текст")
-        if has_buttons:
+        if draft.get('buttons'):
             menu.append("🔘 /edit_buttons — кнопки")
+        menu.append("\n👁 /preview | ❌ /cancel")
         
-        menu.append("\n👁 /preview — предпросмотр")
-        menu.append("❌ /cancel — отмена")
-        
-        await send_callback('\n'.join(menu))
+        await send('\n'.join(menu))
     
-    async def handle_edit_photo(self, user_id, send_callback):
+    async def handle_edit_photo(self, user_id, send):
         self.state.set_step(user_id, 'post_waiting_photo')
-        await send_callback("🖼 Отправьте новое фото или /skip /cancel")
+        await send("🖼 Новое фото или /skip /cancel")
     
-    async def handle_edit_text(self, user_id, send_callback):
+    async def handle_edit_text(self, user_id, send):
         self.state.set_step(user_id, 'post_waiting_text')
-        await send_callback("📝 Напишите новый текст или /skip /cancel")
+        await send("📝 Новый текст или /skip /cancel")
     
-    async def handle_edit_buttons(self, user_id, send_callback):
+    async def handle_edit_buttons(self, user_id, send):
         self.state.set_step(user_id, 'post_waiting_buttons')
-        await send_callback("🔘 Введите новые кнопки или /skip /cancel")
+        await send("🔘 Новые кнопки или /skip /cancel")
     
     # ========== ПУБЛИКАЦИЯ ==========
     
-    async def handle_publish(self, user_id, send_callback, immediate=True, schedule_time=None):
-        logger.info(f"[CMD-PUBLISH] ========== PUBLISHING ==========")
-        logger.info(f"[CMD-PUBLISH] immediate={immediate}")
-        
+    async def handle_publish(self, user_id, send, immediate=True, schedule_time=None):
+        logger.info(f"[PUBLISH] ==========")
         draft = self.state.get_draft(user_id)
         if draft is None:
-            await send_callback("❌ Нет черновика")
+            await send("❌ Нет черновика")
             return
         
-        logger.info(f"[CMD-PUBLISH] text='{draft.get('text', '')[:50]}...', markup={len(draft.get('markup', []))}, buttons={len(draft.get('buttons', []))}, attachments={len(draft.get('attachments', []))}")
+        logger.info(f"[PUBLISH] text='{draft.get('text', '')[:50]}...' buttons={len(draft.get('buttons', []))} attachments={len(draft.get('attachments', []))}")
         
         if not immediate and schedule_time:
             job_id = self.scheduler.schedule_post(user_id, draft, schedule_time)
             if job_id:
                 self.state.clear_draft(user_id)
                 self.state.clear_session(user_id)
-                await send_callback(f"✅ Запланировано на {schedule_time}")
+                await send(f"✅ Запланировано на {schedule_time}")
             else:
-                await send_callback("❌ Неверный формат даты (ГГГГ-ММ-ДД ЧЧ:ММ)")
+                await send("❌ Неверная дата (ГГГГ-ММ-ДД ЧЧ:ММ)")
             return
         
-        await send_callback("⏳ Публикую...")
+        await send("⏳ Публикую...")
         
         attachments = []
         for att in draft.get('raw_attachments', []):
             if isinstance(att, dict) and att.get('type'):
                 attachments.append({'type': att['type'], 'payload': att.get('payload', {})})
         
-        # 🔥 Используем перебор форматирования
-        result = await self.max_client.send_message_with_format_retry(
+        # 🔥 ОДНА публикация с format=html
+        result = await self.max_client.send_message(
             chat_id=self.channel_id,
             text=draft.get('text', ''),
-            markup=draft.get('markup'),
             buttons=draft.get('buttons'),
-            attachments=attachments if attachments else None
+            attachments=attachments if attachments else None,
+            use_html_format=True  # Всегда html для форматирования
         )
         
         if "error" not in result:
             message_id = result.get('message', {}).get('body', {}).get('mid')
             if message_id:
                 self.stats.record_message(message_id, self.channel_id, draft.get('text', ''), datetime.now().isoformat())
-            
             self.state.clear_draft(user_id)
             self.state.clear_session(user_id)
-            
-            await send_callback(f"✅ Опубликовано! {self._help_text()}")
-            logger.info(f"[CMD-PUBLISH] ✅ SUCCESS! msg_id={message_id}")
+            await send(f"✅ Опубликовано!\n\n{self._help()}")
+            logger.info(f"[PUBLISH] ✅ msg_id={message_id}")
         else:
-            error_detail = result.get('detail', 'неизвестная ошибка')
-            await send_callback(f"❌ Ошибка: {error_detail[:200]}")
-            logger.error(f"[CMD-PUBLISH] ❌ FAILED: {error_detail[:200]}")
+            await send(f"❌ Ошибка: {result.get('detail', '')[:200]}")
+            logger.error(f"[PUBLISH] ❌ {result.get('detail', '')[:200]}")
+        logger.info("[PUBLISH] ==========")
     
     # ========== ОТМЕНА ==========
     
-    async def handle_cancel(self, user_id, send_callback):
-        logger.info(f"[CMD-CANCEL] /cancel user={user_id}")
+    async def handle_cancel(self, user_id, send):
         self.state.clear_draft(user_id)
         self.state.clear_session(user_id)
-        await send_callback(f"🗑️ Сброшено.\n\n{self._help_text()}")
+        await send(f"🗑️ Сброшено.\n\n{self._help()}")
     
-    # ========== ПРОЧЕЕ ==========
+    # ========== SKIP ==========
     
-    async def handle_skip(self, user_id, send_callback):
-        """Обрабатывает /skip на любом шаге"""
+    async def handle_skip(self, user_id, send):
         step = self.state.get_step(user_id)
-        logger.info(f"[CMD-SKIP] /skip at step={step}")
+        logger.info(f"[SKIP] step={step}")
         
         if step == 'post_waiting_photo':
             self.state.set_step(user_id, 'post_waiting_text')
-            await send_callback("📝 Шаг 2/3: Напишите текст\n\n⏭ /skip | ❌ /cancel")
-        
+            await send("📝 Шаг 2/3: Напишите текст\n⏭ /skip | ❌ /cancel")
         elif step == 'post_waiting_text':
             self.state.set_step(user_id, 'post_waiting_buttons')
-            await send_callback("🔘 Шаг 3/3: Добавьте URL-кнопки\n\n⏭ /skip | ❌ /cancel")
-        
+            await send("🔘 Шаг 3/3: Добавьте URL-кнопки\n⏭ /skip | ❌ /cancel")
         elif step == 'post_waiting_buttons':
             session = self.state.get_session_data(user_id)
             session['buttons'] = []
             self.state.save_draft(user_id, session.copy())
             self.state.set_step(user_id, 'post_ready')
-            await self.send_preview(user_id, send_callback, session)
+            await self.send_preview(user_id, send, session)
     
-    async def handle_stats(self, user_id, send_callback):
+    # ========== ПРОЧЕЕ ==========
+    
+    async def handle_stats(self, user_id, send):
         all_stats = self.stats.get_stats()
         if not all_stats:
-            await send_callback("📊 Статистика пуста")
+            await send("📊 Пусто")
             return
         report = ["📊 Последние посты:\n"]
         for item in all_stats[-10:]:
-            mid = item['message_id'][:12]
-            report.append(f"• {mid}... | 👁 {item.get('views', 0)}")
-        await send_callback('\n'.join(report))
+            report.append(f"• {item['message_id'][:12]}... | 👁 {item.get('views', 0)}")
+        await send('\n'.join(report))
     
-    async def handle_settings(self, user_id, send_callback):
-        await send_callback(
-            "⚙️ Настройки\n\n"
-            "/set_channel ID — канал\n"
-            "/set_password pwd — пароль\n"
-            "/list_admins — админы"
-        )
+    async def handle_settings(self, user_id, send):
+        await send("⚙️ /set_channel ID | /set_password pwd | /list_admins")
     
-    async def handle_set_channel(self, user_id, new_id, send_callback):
-        await send_callback(f"✅ Канал: {new_id} (перезапустите бота)")
+    async def handle_set_channel(self, user_id, new_id, send):
+        await send(f"✅ Канал: {new_id} (перезапустите)")
     
-    async def handle_set_password(self, user_id, new_pwd, send_callback):
+    async def handle_set_password(self, user_id, new_pwd, send):
         self.auth.change_password(new_pwd)
-        await send_callback("✅ Пароль изменён")
+        await send("✅ Пароль изменён")
     
-    async def handle_list_admins(self, user_id, send_callback):
+    async def handle_list_admins(self, user_id, send):
         admins = self.auth.authorized
         if not admins:
-            await send_callback("👥 Нет авторизованных")
+            await send("👥 Пусто")
             return
         report = ["👥 Админы:"]
         for uid, data in admins.items():
             report.append(f"• {uid} | {data.get('auth_time', '')[:16]}")
-        await send_callback('\n'.join(report))
+        await send('\n'.join(report))
 
 # ===================================================================
 # 🌐 WEBHOOK
 # ===================================================================
 async def webhook_handler(request, handlers):
-    logger.info(f"[WEBHOOK] 📨 {request.method}")
     if request.method != 'POST':
         return web.Response(status=405)
-    
     try:
         body = await request.json()
-        logger.info(f"[WEBHOOK] 📦 {json.dumps(body, ensure_ascii=False)[:800]}")
-        
+        logger.info(f"[WEBHOOK] 📦 {json.dumps(body, ensure_ascii=False)[:600]}")
         if body.get('update_type') == 'message_created' and (msg := body.get('message')):
             await handle_incoming_message(msg, handlers)
-        
         return web.Response(status=200)
     except Exception as e:
-        logger.exception(f"[WEBHOOK] Error: {e}")
+        logger.exception(f"[WEBHOOK] {e}")
         return web.Response(status=500)
 
 async def handle_incoming_message(msg, handlers):
     logger.info("=" * 80)
-    logger.info("[MSG] 📨 Processing")
     
     rec = msg.get('recipient', {})
     sender = msg.get('sender', {})
@@ -1118,21 +828,18 @@ async def handle_incoming_message(msg, handlers):
     chat_id = rec.get('chat_id')
     
     if not user_id:
-        logger.error("[MSG] No user_id")
         return
     
-    logger.info(f"[MSG] 👤 user={user_id} chat={chat_id}")
+    logger.info(f"[MSG] user={user_id} chat={chat_id}")
     
     handlers.state.get_session(user_id)['chat_id'] = chat_id
     
-    async def send_callback(text, markup=None, buttons=None, attachments=None):
+    async def send(text, buttons=None):
         logger.info(f"[SEND] '{text[:50]}...'")
-        return await handlers.max_client.send_message_with_format_retry(
+        return await handlers.max_client.send_message(
             chat_id=chat_id or user_id,
             text=text,
-            markup=markup,
-            buttons=buttons,
-            attachments=attachments
+            buttons=buttons
         )
     
     body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
@@ -1140,7 +847,7 @@ async def handle_incoming_message(msg, handlers):
     markup = body.get('markup', []) or msg.get('markup', [])
     raw_attachments = body.get('attachments', []) or msg.get('attachments', [])
     
-    logger.info(f"[MSG] text='{text[:100]}...', markup={len(markup)}, attachments={len(raw_attachments)}")
+    logger.info(f"[MSG] text='{text[:80]}...' markup={len(markup)} attachments={len(raw_attachments)}")
     
     step = handlers.state.get_step(user_id)
     logger.info(f"[MSG] step={step}")
@@ -1149,55 +856,57 @@ async def handle_incoming_message(msg, handlers):
     
     # Роутинг
     if cmd == '/start':
-        await handlers.handle_start(user_id, chat_id, send_callback)
+        await handlers.handle_start(user_id, chat_id, send)
     elif cmd == '/post':
-        await handlers.handle_post_command(user_id, send_callback)
+        await handlers.handle_post_command(user_id, send)
     elif cmd == '/skip':
-        await handlers.handle_skip(user_id, send_callback)
+        await handlers.handle_skip(user_id, send)
     elif cmd == '/preview':
-        await handlers.handle_preview(user_id, send_callback)
+        await handlers.handle_preview(user_id, send)
     elif cmd == '/edit':
-        await handlers.handle_edit(user_id, send_callback)
+        await handlers.handle_edit(user_id, send)
     elif cmd == '/edit_photo':
-        await handlers.handle_edit_photo(user_id, send_callback)
+        await handlers.handle_edit_photo(user_id, send)
     elif cmd == '/edit_text':
-        await handlers.handle_edit_text(user_id, send_callback)
+        await handlers.handle_edit_text(user_id, send)
     elif cmd == '/edit_buttons':
-        await handlers.handle_edit_buttons(user_id, send_callback)
+        await handlers.handle_edit_buttons(user_id, send)
     elif cmd == '/publish':
-        await handlers.handle_publish(user_id, send_callback)
+        await handlers.handle_publish(user_id, send)
     elif cmd.startswith('/schedule '):
-        await handlers.handle_publish(user_id, send_callback, immediate=False, schedule_time=cmd.replace('/schedule ', ''))
+        await handlers.handle_publish(user_id, send, immediate=False, schedule_time=cmd.replace('/schedule ', ''))
     elif cmd == '/cancel':
-        await handlers.handle_cancel(user_id, send_callback)
+        await handlers.handle_cancel(user_id, send)
     elif cmd == '/stats':
-        await handlers.handle_stats(user_id, send_callback)
+        await handlers.handle_stats(user_id, send)
     elif cmd == '/settings':
-        await handlers.handle_settings(user_id, send_callback)
+        await handlers.handle_settings(user_id, send)
     elif cmd.startswith('/set_channel '):
-        await handlers.handle_set_channel(user_id, cmd.split()[1], send_callback)
+        await handlers.handle_set_channel(user_id, cmd.split()[1], send)
     elif cmd.startswith('/set_password '):
-        await handlers.handle_set_password(user_id, cmd.split()[1], send_callback)
+        await handlers.handle_set_password(user_id, cmd.split()[1], send)
     elif cmd == '/list_admins':
-        await handlers.handle_list_admins(user_id, send_callback)
+        await handlers.handle_list_admins(user_id, send)
     elif step == 'waiting_password':
-        await handlers.handle_password(user_id, text.strip(), send_callback)
+        await handlers.handle_password(user_id, text.strip(), send)
     elif step == 'post_waiting_photo':
         if raw_attachments:
-            await handlers.handle_post_photo(user_id, raw_attachments, send_callback)
+            await handlers.handle_post_photo(user_id, raw_attachments, send)
         else:
-            await send_callback("📸 Отправьте фото или /skip")
+            await send("📸 Отправьте фото или /skip")
     elif step == 'post_waiting_text':
-        await handlers.handle_post_text(user_id, text, markup, raw_attachments, send_callback)
+        await handlers.handle_post_text(user_id, text, markup, raw_attachments, send)
     elif step == 'post_waiting_buttons':
-        await handlers.handle_post_buttons(user_id, text, send_callback)
+        await handlers.handle_post_buttons(user_id, text, send)
     elif step == 'post_ready':
-        await handlers.handle_edit_text(user_id, text, markup, raw_attachments, send_callback)
+        # Если прислали новое — редактируем текст
+        await handlers.handle_post_text(user_id, text, markup, raw_attachments, send)
+        await handlers.send_preview(user_id, send)
     else:
         if handlers.auth.is_authorized(user_id):
-            await send_callback(handlers._help_text())
+            await send(handlers._help())
         else:
-            await send_callback("🔐 /start")
+            await send("🔐 /start")
     
     logger.info("=" * 80)
 
@@ -1205,16 +914,13 @@ async def handle_incoming_message(msg, handlers):
 # 🌐 SERVER
 # ===================================================================
 async def health(request):
-    return web.json_response({"ok": True, "version": "7.0"})
+    return web.json_response({"ok": True, "version": "7.1"})
 
 async def root(request):
-    return web.json_response({"bot": "MAX Channel Poster", "version": "7.0"})
+    return web.json_response({"bot": "MAX Channel Poster", "version": "7.1"})
 
 async def on_startup(app):
-    logger.info("🚀" * 40)
-    logger.info("🚀 STARTING v7.0 — FULL REWORK")
-    logger.info("🚀" * 40)
-    
+    logger.info("🚀 STARTING v7.1 — STABLE")
     app['auth'] = AuthManager(BOT_PASSWORD, AUTH_FILE, REQUIRE_PASSWORD)
     app['state'] = StateManager()
     app['max_client'] = MAXClient(BOT_TOKEN, BASE_API_URL, API_TIMEOUT)
@@ -1222,19 +928,12 @@ async def on_startup(app):
     app['stats'] = StatsCollector(STATS_FILE)
     app['scheduler'] = PublishScheduler(app['max_client'], CHANNEL_ID)
     app['scheduler'].start()
-    
-    app['handlers'] = CommandHandlers(
-        app['auth'], app['state'], app['max_client'],
-        app['media_mgr'], app['scheduler'], app['stats'], CHANNEL_ID
-    )
-    
+    app['handlers'] = CommandHandlers(app['auth'], app['state'], app['max_client'], app['media_mgr'], app['scheduler'], app['stats'], CHANNEL_ID)
     if RENDER_EXTERNAL_URL:
         await app['max_client'].register_webhook(f"{RENDER_EXTERNAL_URL}/webhook", CHANNEL_ID)
-    
     logger.info("✅ Ready!")
 
 async def on_cleanup(app):
-    logger.info("🔚 Shutting down...")
     if 'scheduler' in app:
         app['scheduler'].stop()
     if 'max_client' in app:
@@ -1251,5 +950,4 @@ def create_app():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
-    logger.info(f"🌐 Port {port}")
     web.run_app(create_app(), host='0.0.0.0', port=port, access_log=None)
