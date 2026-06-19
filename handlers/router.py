@@ -68,13 +68,13 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             handle_set_password, handle_list_admins
         )
         from handlers.inline_buttons import (
-            handle_inline_text, handle_inline_use
+            handle_inline_text, handle_inline_use, handle_inline_confirm
         )
         from handlers.templates import (
             handle_templates_menu,
             handle_inline_add, handle_inline_list, handle_inline_del,
             handle_btn_add, handle_btn_list, handle_btn_del,
-            handle_btn_use
+            handle_btn_use, handle_btn_confirm
         )
         
         # === РОУТИНГ КОМАНД ===
@@ -102,6 +102,12 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         
         elif cmd == '/edit_buttons':
             await handle_edit_buttons(user_id, send, state)
+        
+        elif cmd == '/inline_yes':
+            await handle_inline_confirm(user_id, send, state, max_client)
+        
+        elif cmd == '/btn_yes':
+            await handle_btn_confirm(user_id, send, state, max_client)
         
         elif cmd == '/publish':
             await handle_publish(user_id, send, state, max_client, scheduler, stats, channel_id)
@@ -206,6 +212,15 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             else:
                 await handle_inline_text(user_id, text, send, state, max_client)
         
+        elif step == 'post_waiting_inline_confirm':
+            if cmd == '/inline_yes':
+                await handle_inline_confirm(user_id, send, state, max_client)
+            elif cmd == '/skip':
+                state.set_step(user_id, 'post_waiting_buttons')
+                await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+            else:
+                await send("✅ /inline_yes — подтвердить\n❌ /skip — пропустить")
+        
         elif step == 'post_waiting_buttons':
             if cmd == '/btn_use':
                 await handle_btn_use(user_id, send, state)
@@ -213,6 +228,18 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
                 await handle_skip(user_id, send, state)
             else:
                 await handle_post_buttons(user_id, text, send, state, max_client)
+        
+        elif step == 'post_waiting_buttons_confirm':
+            if cmd == '/btn_yes':
+                await handle_btn_confirm(user_id, send, state, max_client)
+            elif cmd == '/skip':
+                session = state.get_session_data(user_id)
+                session['buttons'] = []
+                state.save_draft(user_id, session.copy())
+                state.set_step(user_id, 'post_ready')
+                await send_preview(user_id, send, state, max_client)
+            else:
+                await send("✅ /btn_yes — подтвердить\n❌ /skip — пропустить")
         
         elif step == 'post_ready':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
