@@ -77,8 +77,6 @@ async def handle_inline_use(user_id, send, state, max_client=None):
     """Использовать сохранённые шаблоны слов-ссылок"""
     logger.info(f"[INLINE-USE] user={user_id}")
     
-    session = state.get_session_data(user_id)
-    
     from handlers.templates import load_inline_templates
     templates = load_inline_templates(user_id)
     
@@ -87,7 +85,29 @@ async def handle_inline_use(user_id, send, state, max_client=None):
         await send("❌ Нет сохранённых шаблонов\nВведите слова-ссылки вручную:")
         return
     
-    # Формируем блок с заголовком
+    # Показываем что будет добавлено и запрашиваем подтверждение
+    preview = "🔗 Будут добавлены:\n"
+    for t in templates:
+        preview += f"• {t['text']} → {t['url'][:40]}...\n"
+    preview += "\n✅ /inline_yes — добавить\n❌ /skip — пропустить"
+    
+    # Сохраняем templates во временные данные сессии для подтверждения
+    state.set_step(user_id, 'post_waiting_inline_confirm', {'pending_inline': templates})
+    await send(preview)
+
+
+async def handle_inline_confirm(user_id, send, state, max_client=None):
+    """Подтверждение добавления слов-ссылок"""
+    logger.info(f"[INLINE-CONFIRM] user={user_id}")
+    
+    session = state.get_session_data(user_id)
+    templates = session.get('pending_inline', [])
+    
+    if not templates:
+        await send("❌ Нет данных для добавления")
+        state.set_step(user_id, 'post_waiting_buttons')
+        return
+    
     current_text = session.get('text', '')
     
     inline_block = '\n\n🔗 Полезные ссылки:\n'
@@ -101,9 +121,9 @@ async def handle_inline_use(user_id, send, state, max_client=None):
     
     session['text'] = apply_inline_links(session['text'])
     session['inline_links'] = templates
+    session.pop('pending_inline', None)
     
-    logger.info(f"[INLINE-USE] Applied {len(templates)} templates")
+    logger.info(f"[INLINE-CONFIRM] Applied {len(templates)} templates")
     
-    # Переходим к шагу 4
     state.set_step(user_id, 'post_waiting_buttons')
-    await send(f"✅ Применено {len(templates)} шаблонов\n🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+    await send(f"✅ Добавлено {len(templates)} ссылок\n🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
