@@ -85,6 +85,7 @@ async def handle_skip(user_id, send, state):
     if step == 'post_waiting_photo':
         state.set_step(user_id, 'post_waiting_text')
         await send("📝 Шаг 2/4: Напишите текст\n⏭ /skip | ❌ /cancel")
+    
     elif step == 'post_waiting_text':
         state.set_step(user_id, 'post_waiting_inline')
         await send(
@@ -94,13 +95,32 @@ async def handle_skip(user_id, send, state):
             "📋 /inline_use — использовать сохранённые\n"
             "❌ /cancel — отмена"
         )
+    
     elif step == 'post_waiting_inline':
         state.set_step(user_id, 'post_waiting_buttons')
         await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+    
+    elif step == 'post_waiting_inline_confirm':
+        state.set_step(user_id, 'post_waiting_buttons')
+        await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+    
     elif step == 'post_waiting_buttons':
         session = state.get_session_data(user_id)
         session['buttons'] = []
         state.save_draft(user_id, session.copy())
         state.set_step(user_id, 'post_ready')
+        from handlers.preview import send_preview
+        await send_preview(user_id, send, state)
+    
+    elif step == 'post_waiting_buttons_confirm':
+        session = state.get_session_data(user_id)
+        session['buttons'] = []
+        session.pop('pending_buttons', None)
+        state.save_draft(user_id, session.copy())
+        state.set_step(user_id, 'post_ready')
+        from handlers.preview import send_preview
+        await send_preview(user_id, send, state)
+    
+    elif step == 'post_ready':
         from handlers.preview import send_preview
         await send_preview(user_id, send, state)
