@@ -1,6 +1,8 @@
 """
 Главный роутер команд
 """
+import json
+import asyncio
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,7 +52,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         cmd = text.strip()
         
         # Импорты handlers
-        from handlers.start import handle_start
+        from handlers.start import handle_start, help_text
         from handlers.auth_handler import handle_password
         from handlers.post_create import (
             handle_post_command, handle_post_photo, handle_post_text,
@@ -65,62 +67,159 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             handle_stats, handle_settings, handle_set_channel,
             handle_set_password, handle_list_admins
         )
+        from handlers.inline_buttons import (
+            handle_inline_text, handle_inline_use
+        )
+        from handlers.templates import (
+            handle_templates_menu,
+            handle_inline_add, handle_inline_list, handle_inline_del,
+            handle_btn_add, handle_btn_list, handle_btn_del,
+            handle_btn_use
+        )
         
-        # Роутинг
+        # === РОУТИНГ КОМАНД ===
+        
         if cmd == '/start':
             await handle_start(user_id, chat_id, send, auth, state)
+        
         elif cmd == '/post':
             await handle_post_command(user_id, send, auth, state)
+        
         elif cmd == '/skip':
             await handle_skip(user_id, send, state)
+        
         elif cmd == '/preview':
             await send_preview(user_id, send, state, max_client)
+        
         elif cmd == '/edit':
             await handle_edit(user_id, send, state)
+        
         elif cmd == '/edit_photo':
             await handle_edit_photo(user_id, send, state)
+        
         elif cmd == '/edit_text':
             await handle_edit_text(user_id, send, state)
+        
         elif cmd == '/edit_buttons':
             await handle_edit_buttons(user_id, send, state)
+        
         elif cmd == '/publish':
             await handle_publish(user_id, send, state, max_client, scheduler, stats, channel_id)
+        
         elif cmd.startswith('/schedule '):
             time_str = cmd.replace('/schedule ', '')
             await handle_publish(user_id, send, state, max_client, scheduler, stats, channel_id,
                                immediate=False, schedule_time=time_str)
+        
         elif cmd == '/cancel':
-            from handlers.start import help_text
             state.clear_draft(user_id)
             state.clear_session(user_id)
             await send(f"🗑️ Сброшено.\n\n{help_text()}")
+        
         elif cmd == '/stats':
             await handle_stats(send, stats)
+        
         elif cmd == '/settings':
             await handle_settings(send)
+        
         elif cmd.startswith('/set_channel '):
             await handle_set_channel(user_id, cmd.split()[1], send)
+        
         elif cmd.startswith('/set_password '):
             await handle_set_password(user_id, cmd.split()[1], send, auth)
+        
         elif cmd == '/list_admins':
             await handle_list_admins(send, auth)
+        
+        # === ШАБЛОНЫ ===
+        elif cmd == '/templates':
+            await handle_templates_menu(send)
+        
+        elif cmd.startswith('/inline_add '):
+            await handle_inline_add(user_id, cmd.replace('/inline_add ', ''), send)
+        
+        elif cmd == '/inline_list':
+            await handle_inline_list(user_id, send)
+        
+        elif cmd.startswith('/inline_del '):
+            await handle_inline_del(user_id, cmd.replace('/inline_del ', ''), send)
+        
+        elif cmd.startswith('/btn_add '):
+            await handle_btn_add(user_id, cmd.replace('/btn_add ', ''), send)
+        
+        elif cmd == '/btn_list':
+            await handle_btn_list(user_id, send)
+        
+        elif cmd.startswith('/btn_del '):
+            await handle_btn_del(user_id, cmd.replace('/btn_del ', ''), send)
+        
+        # === ТЕСТ ЦВЕТОВ ===
+        elif cmd == '/test_colors':
+            logger.info("[TEST-COLORS] 🎨 Testing button colors...")
+            await send("🎨 Отправляю 5 тестовых кнопок в канал...")
+            
+            colors = [
+                ("#00747A", "Бирюзовый"),
+                ("#F4991A", "Оранжевый"),
+                ("#FDC30B", "Жёлтый"),
+                ("primary", "Синий (primary)"),
+                ("success", "Зелёный (success)"),
+            ]
+            
+            for color, name in colors:
+                btn_data = {"type": "link", "text": f"Кнопка {name}", "url": "https://ya.ru"}
+                if color.startswith('#'):
+                    btn_data['color'] = color
+                else:
+                    btn_data['style'] = color
+                
+                result = await max_client.send_message(
+                    chat_id=channel_id,
+                    text=f"🎨 Тест: {name} ({color})",
+                    buttons=[[btn_data]]
+                )
+                
+                resp_btn = result.get('message', {}).get('body', {}).get('attachments', [])
+                logger.info(f"[TEST-COLORS] {name} ({color}): {json.dumps(resp_btn, ensure_ascii=False)[:200]}")
+                await asyncio.sleep(0.5)
+            
+            await send("✅ Готово! Проверь канал и скажи какие цвета сработали.")
+        
+        # === ОБРАБОТКА ПО ШАГАМ ===
         elif step == 'waiting_password':
             await handle_password(user_id, text.strip(), send, auth, state)
+        
         elif step == 'post_waiting_photo':
             if raw_attachments:
                 await handle_post_photo(user_id, raw_attachments, send, state, media_mgr)
             else:
                 await send("📸 Отправьте фото или /skip")
+        
         elif step == 'post_waiting_text':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
+        
+        elif step == 'post_waiting_inline':
+            if cmd == '/inline_use':
+                await handle_inline_use(user_id, send, state, max_client)
+            elif cmd == '/skip':
+                await handle_skip(user_id, send, state)
+            else:
+                await handle_inline_text(user_id, text, send, state, max_client)
+        
         elif step == 'post_waiting_buttons':
-            await handle_post_buttons(user_id, text, send, state, max_client)
+            if cmd == '/btn_use':
+                await handle_btn_use(user_id, send, state)
+            elif cmd == '/skip':
+                await handle_skip(user_id, send, state)
+            else:
+                await handle_post_buttons(user_id, text, send, state, max_client)
+        
         elif step == 'post_ready':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
             await send_preview(user_id, send, state, max_client)
+        
         else:
             if auth.is_authorized(user_id):
-                from handlers.start import help_text
                 await send(help_text())
             else:
                 await send("🔐 /start")
