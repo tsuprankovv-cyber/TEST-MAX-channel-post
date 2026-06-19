@@ -20,7 +20,14 @@ async def handle_stats(send, stats):
 
 async def handle_settings(send):
     logger.info("[SETTINGS] Requested")
-    await send("⚙️ /set_channel ID | /set_password pwd | /list_admins")
+    await send(
+        "⚙️ **Настройки**\n\n"
+        "/set_channel ID — сменить канал\n"
+        "/set_password pwd — сменить пароль\n"
+        "/list_admins — список админов\n"
+        "/templates — управление шаблонами\n"
+        "/test_colors — тест цветов кнопок"
+    )
 
 
 async def handle_set_channel(user_id, new_id, send):
