@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 
 
 class StateManager:
-    STEPS = ['post_waiting_photo', 'post_waiting_text', 'post_waiting_buttons', 'post_ready']
+    STEPS = ['post_waiting_photo', 'post_waiting_text', 'post_waiting_inline', 'post_waiting_buttons', 'post_ready']
     
     def __init__(self):
         self.sessions: Dict[int, Dict] = {}
@@ -43,7 +43,7 @@ class StateManager:
     def save_draft(self, user_id: int, draft: Dict):
         draft['saved_at'] = datetime.now().isoformat()
         self.drafts[user_id] = draft
-        logger.info(f"[STATE] 💾 draft user={user_id} photo={bool(draft.get('attachments'))} text={bool(draft.get('text'))} buttons={bool(draft.get('buttons'))}")
+        logger.info(f"[STATE] 💾 draft user={user_id} photo={bool(draft.get('attachments'))} text={bool(draft.get('text'))} inline={bool(draft.get('inline_links'))} buttons={bool(draft.get('buttons'))}")
     
     def get_draft(self, user_id: int) -> Optional[Dict]:
         return self.drafts.get(user_id)
