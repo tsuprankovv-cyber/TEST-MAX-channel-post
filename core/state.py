@@ -9,7 +9,15 @@ logger = get_logger(__name__)
 
 
 class StateManager:
-    STEPS = ['post_waiting_photo', 'post_waiting_text', 'post_waiting_inline', 'post_waiting_buttons', 'post_ready']
+    STEPS = [
+        'post_waiting_photo',
+        'post_waiting_text',
+        'post_waiting_inline',
+        'post_waiting_inline_confirm',
+        'post_waiting_buttons',
+        'post_waiting_buttons_confirm',
+        'post_ready'
+    ]
     
     def __init__(self):
         self.sessions: Dict[int, Dict] = {}
