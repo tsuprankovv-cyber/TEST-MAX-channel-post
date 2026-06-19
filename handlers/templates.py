@@ -93,11 +93,10 @@ def save_button_template(user_id: int, text: str, url: str, style: str = "primar
     data[user_id_str]['templates'].append({
         "type": "link",
         "text": text,
-        "url": url,
-        "style": style
+        "url": url
     })
     _save(BUTTON_TEMPLATES_FILE, data)
-    logger.info(f"[TEMPLATES] Added button: '{text}' → {url[:50]}... style={style}")
+    logger.info(f"[TEMPLATES] Added button: '{text}' → {url[:50]}...")
 
 
 def delete_button_template(user_id: int, index: int):
@@ -209,7 +208,7 @@ async def handle_btn_del(user_id, index_str, send):
 
 
 async def handle_btn_use(user_id, send, state):
-    """Использовать сохранённые шаблоны кнопок"""
+    """Использовать сохранённые шаблоны кнопок — с подтверждением"""
     logger.info(f"[BTN-USE] user={user_id}")
     
     templates = load_button_templates(user_id)
@@ -218,13 +217,35 @@ async def handle_btn_use(user_id, send, state):
         await send("❌ Нет сохранённых кнопок\nВведите кнопки вручную:")
         return
     
+    # Показываем что будет добавлено
+    preview = "🔘 Будут добавлены кнопки:\n"
+    for i, t in enumerate(templates):
+        preview += f"{i+1}. {t['text']} → {t['url'][:40]}...\n"
+    preview += "\n✅ /btn_yes — добавить\n❌ /skip — пропустить"
+    
+    # Сохраняем во временные данные
+    state.set_step(user_id, 'post_waiting_buttons_confirm', {'pending_buttons': templates})
+    await send(preview)
+
+
+async def handle_btn_confirm(user_id, send, state, max_client=None):
+    """Подтверждение добавления кнопок и показ предпросмотра"""
+    logger.info(f"[BTN-CONFIRM] user={user_id}")
+    
     session = state.get_session_data(user_id)
-    session['buttons'] = [[t] for t in templates]  # Каждая кнопка в отдельном ряду
+    templates = session.get('pending_buttons', [])
+    
+    if not templates:
+        await send("❌ Нет данных для добавления")
+        state.set_step(user_id, 'post_waiting_buttons')
+        return
+    
+    session['buttons'] = [[t] for t in templates]
+    session.pop('pending_buttons', None)
     state.save_draft(user_id, session.copy())
     state.set_step(user_id, 'post_ready')
     
-    from handlers.preview import send_preview
-    from api.client import MAXClient
+    logger.info(f"[BTN-CONFIRM] Applied {len(templates)} buttons")
     
-    logger.info(f"[BTN-USE] Applied {len(templates)} button templates")
-    await send(f"✅ Применено {len(templates)} кнопок")
+    from handlers.preview import send_preview
+    await send_preview(user_id, send, state, max_client)
