@@ -114,7 +114,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif step == 'post_waiting_text':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
         elif step == 'post_waiting_buttons':
-            await handle_post_buttons(user_id, text, send, state)
+            await handle_post_buttons(user_id, text, send, state, max_client)
         elif step == 'post_ready':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
             await send_preview(user_id, send, state, max_client)
