@@ -55,7 +55,7 @@ async def handle_post_text(user_id, text, markup, raw_attachments, send, state, 
     await send("✅ Текст сохранён\n🔘 Шаг 3/3: Добавьте URL-кнопки\nФормат: Название | https://ссылка\n⏭ /skip | ❌ /cancel")
 
 
-async def handle_post_buttons(user_id, buttons_text, send, state):
+async def handle_post_buttons(user_id, buttons_text, send, state, max_client=None):
     logger.info(f"[POST-BTN] user={user_id} text='{buttons_text[:100]}...'")
     
     session = state.get_session_data(user_id)
@@ -64,7 +64,7 @@ async def handle_post_buttons(user_id, buttons_text, send, state):
     state.set_step(user_id, 'post_ready')
     
     from handlers.preview import send_preview
-    await send_preview(user_id, send, state)
+    await send_preview(user_id, send, state, max_client)
 
 
 async def handle_skip(user_id, send, state):
