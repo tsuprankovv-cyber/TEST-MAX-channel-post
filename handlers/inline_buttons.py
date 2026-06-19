@@ -55,7 +55,14 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
     if links:
         # Применяем ссылки к тексту
         current_text = session.get('text', '')
-        session['text'] = apply_inline_links(current_text)
+        
+        # Добавляем заголовок и ссылки
+        inline_block = '\n\n🔗 Полезные ссылки:\n'
+        for link in links:
+            inline_block += f'• [{link["text"]}]({link["url"]})\n'
+        
+        session['text'] = current_text + inline_block
+        session['text'] = apply_inline_links(session['text'])
         session['inline_links'] = links
         logger.info(f"[INLINE-TEXT] Applied {len(links)} inline links")
     else:
@@ -80,14 +87,17 @@ async def handle_inline_use(user_id, send, state, max_client=None):
         await send("❌ Нет сохранённых шаблонов\nВведите слова-ссылки вручную:")
         return
     
-    # Применяем шаблоны
+    # Формируем блок с заголовком
     current_text = session.get('text', '')
-    template_text = ' '.join([f'[{t["text"]}]({t["url"]})' for t in templates])
+    
+    inline_block = '\n\n🔗 Полезные ссылки:\n'
+    for t in templates:
+        inline_block += f'• [{t["text"]}]({t["url"]})\n'
     
     if current_text:
-        session['text'] = current_text + '\n\n' + template_text
+        session['text'] = current_text + inline_block
     else:
-        session['text'] = template_text
+        session['text'] = inline_block
     
     session['text'] = apply_inline_links(session['text'])
     session['inline_links'] = templates
