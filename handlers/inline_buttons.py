@@ -9,10 +9,7 @@ logger = get_logger(__name__)
 
 
 def parse_inline_links(text: str) -> List[Dict]:
-    """
-    Парсит слова-ссылки из формата: [текст](url)
-    Возвращает список: [{"text": "текст", "url": "url"}, ...]
-    """
+    """Парсит слова-ссылки из формата: [текст](url)"""
     logger.info(f"[INLINE] Parsing: '{text[:150]}...'")
     
     links = []
@@ -29,9 +26,7 @@ def parse_inline_links(text: str) -> List[Dict]:
 
 
 def apply_inline_links(text: str) -> str:
-    """
-    Конвертирует [текст](url) → <a href="url">текст</a>
-    """
+    """Конвертирует [текст](url) → <a href="url">текст</a>"""
     logger.info(f"[INLINE-APPLY] Applying inline links to text")
     
     pattern = r'\[(.+?)\]\((https?://[^\s)]+)\)'
@@ -39,10 +34,16 @@ def apply_inline_links(text: str) -> str:
     
     if result != text:
         logger.info(f"[INLINE-APPLY] Links applied: '{result[:150]}...'")
-    else:
-        logger.info(f"[INLINE-APPLY] No links found")
     
     return result
+
+
+def preview_inline_links(templates: List[Dict]) -> str:
+    """Показывает как будет выглядеть блок ссылок в посте"""
+    preview = "🔗 Полезные ссылки:\n"
+    for t in templates:
+        preview += f"• {t['text']}\n"
+    return preview
 
 
 async def handle_inline_text(user_id, text, send, state, max_client=None):
@@ -53,10 +54,7 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
     links = parse_inline_links(text)
     
     if links:
-        # Применяем ссылки к тексту
         current_text = session.get('text', '')
-        
-        # Добавляем заголовок и ссылки
         inline_block = '\n\n🔗 Полезные ссылки:\n'
         for link in links:
             inline_block += f'• [{link["text"]}]({link["url"]})\n'
@@ -66,11 +64,18 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
         session['inline_links'] = links
         logger.info(f"[INLINE-TEXT] Applied {len(links)} inline links")
     else:
-        logger.info(f"[INLINE-TEXT] No inline links found in text")
+        logger.info(f"[INLINE-TEXT] No inline links found")
     
-    # Переходим к шагу 4 (кнопки под постом)
     state.set_step(user_id, 'post_waiting_buttons')
-    await send("✅ Ссылки добавлены\n🔘 Шаг 4/4: Добавьте URL-кнопки\nФормат: Название | https://ссылка\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+    await send(
+        "<b>✅ Ссылки добавлены</b>\n\n"
+        "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+        "Формат: <code>Название | https://url</code>\n"
+        "📋 /btn_use — шаблоны\n\n"
+        "─────────────────\n"
+        "⏭ /skip — пропустить\n"
+        "❌ /cancel — отмена"
+    )
 
 
 async def handle_inline_use(user_id, send, state, max_client=None):
@@ -81,19 +86,32 @@ async def handle_inline_use(user_id, send, state, max_client=None):
     templates = load_inline_templates(user_id)
     
     if not templates:
-        logger.info(f"[INLINE-USE] No templates found")
-        await send("❌ Нет сохранённых шаблонов\nВведите слова-ссылки вручную:")
+        await send(
+            "❌ Нет сохранённых шаблонов\n\n"
+            "Введите слова-ссылки вручную:\n"
+            "<code>[слово](https://url)</code>\n\n"
+            "─────────────────\n"
+            "⏭ /skip | ❌ /cancel"
+        )
         return
     
-    # Показываем что будет добавлено и запрашиваем подтверждение
-    preview = "🔗 Будут добавлены:\n"
-    for t in templates:
-        preview += f"• {t['text']} → {t['url'][:40]}...\n"
-    preview += "\n✅ /inline_yes — добавить\n❌ /skip — пропустить"
+    # Показываем что будет добавлено
+    names_list = '\n'.join([f"• {t['text']} → {t['url'][:40]}..." for t in templates])
+    preview_block = preview_inline_links(templates)
     
-    # Сохраняем templates во временные данные сессии для подтверждения
+    await send(
+        f"<b>🔗 Будут добавлены:</b>\n\n"
+        f"{names_list}\n\n"
+        f"<b>📋 Так будет выглядеть в посте:</b>\n"
+        f"<code>───</code>\n"
+        f"{preview_block}\n"
+        f"<code>───</code>\n\n"
+        "─────────────────\n"
+        "✅ /inline_yes — добавить\n"
+        "❌ /skip — пропустить"
+    )
+    
     state.set_step(user_id, 'post_waiting_inline_confirm', {'pending_inline': templates})
-    await send(preview)
 
 
 async def handle_inline_confirm(user_id, send, state, max_client=None):
@@ -126,4 +144,11 @@ async def handle_inline_confirm(user_id, send, state, max_client=None):
     logger.info(f"[INLINE-CONFIRM] Applied {len(templates)} templates")
     
     state.set_step(user_id, 'post_waiting_buttons')
-    await send(f"✅ Добавлено {len(templates)} ссылок\n🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+    await send(
+        f"<b>✅ Добавлено {len(templates)} ссылок</b>\n\n"
+        "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+        "📋 /btn_use — шаблоны\n\n"
+        "─────────────────\n"
+        "⏭ /skip — пропустить\n"
+        "❌ /cancel — отмена"
+    )
