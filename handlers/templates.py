@@ -160,37 +160,52 @@ async def handle_inline_add_name(user_id, text, send, state):
         added.append((name, url))
     
     state.set_step(user_id, None)
-    response = []
     
-    if added:
-        response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
-        for name, _ in added:
-            response.append(f"• {name}")
+    # 🔥 Сначала дубликаты — отдельным сообщением
     if duplicates:
-        response.append(f"\n<b>⚠️ Уже есть ({len(duplicates)}):</b>")
+        dup_lines = [f"<b>⚠️ Уже есть ({len(duplicates)}):</b>"]
         for name, _, existing in duplicates:
-            response.append(f"• {name} → уже «{existing}»")
-    if errors:
-        response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
-        for e in errors:
-            response.append(f"• {e}")
+            dup_lines.append(f"• {name} → уже «{existing}»")
+        dup_lines.append("\n❌ Не добавлено.")
+        dup_lines.append("\n─────────────────")
+        dup_lines.append("➕ /inline_add | 📋 /inline_list")
+        dup_lines.append("🔙 /templates | 🏠 /start")
+        await send('\n'.join(dup_lines))
     
-    templates = load_inline_templates(user_id)
-    if templates:
-        response.append(f"\n<b>📋 Все ссылки ({len(templates)}):</b>")
-        for i, t in enumerate(templates, 1):
-            response.append(f"{i}. {t['text']}")
+    # 🔥 Потом добавленное + предпросмотр
+    if added or errors:
+        response = []
         
-        # 🔥 Предпросмотр с КЛИКАБЕЛЬНЫМИ ссылками
-        response.append(f"\n<b>👁 Предпросмотр:</b>")
-        response.append("🔗 Полезные ссылки:")
-        for t in templates:
-            response.append(f"• <a href=\"{t['url']}\">{t['text']}</a>")
+        if added:
+            response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
+            for name, _ in added:
+                response.append(f"• {name}")
+        
+        if errors:
+            response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
+            for e in errors:
+                response.append(f"• {e}")
+        
+        # Предпросмотр всех ссылок
+        templates = load_inline_templates(user_id)
+        if templates:
+            response.append(f"\n<b>👁 Предпросмотр:</b>")
+            response.append("🔗 Полезные ссылки:")
+            for t in templates:
+                response.append(f"• <a href=\"{t['url']}\">{t['text']}</a>")
+        
+        response.append("\n─────────────────")
+        response.append("➕ /inline_add | 📋 /inline_list")
+        response.append("🔙 /templates | 🏠 /start")
+        await send('\n'.join(response))
     
-    response.append("\n─────────────────")
-    response.append("➕ /inline_add | 📋 /inline_list")
-    response.append("🔙 /templates | 🏠 /start")
-    await send('\n'.join(response))
+    # Если ничего не добавили и нет ошибок — только дубликаты уже отправлены
+    if not added and not errors and not duplicates:
+        await send(
+            "❌ Ничего не добавлено.\n\n"
+            "─────────────────\n"
+            "➕ /inline_add | 🔙 /templates | 🏠 /start"
+        )
 
 
 async def handle_btn_add_start(user_id, send, state):
@@ -223,37 +238,55 @@ async def handle_btn_add_name(user_id, text, send, state, max_client=None):
         added.append((name, url))
     
     state.set_step(user_id, None)
-    response = []
     
-    if added:
-        response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
-        for name, _ in added:
-            response.append(f"• {name}")
+    # 🔥 Сначала дубликаты — отдельным сообщением
     if duplicates:
-        response.append(f"\n<b>⚠️ Уже есть ({len(duplicates)}):</b>")
+        dup_lines = [f"<b>⚠️ Уже есть ({len(duplicates)}):</b>"]
         for name, _, existing in duplicates:
-            response.append(f"• {name} → уже «{existing}»")
-    if errors:
-        response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
-        for e in errors:
-            response.append(f"• {e}")
+            dup_lines.append(f"• {name} → уже «{existing}»")
+        dup_lines.append("\n❌ Не добавлено.")
+        dup_lines.append("\n─────────────────")
+        dup_lines.append("➕ /btn_add | 📋 /btn_list")
+        dup_lines.append("🔙 /templates | 🏠 /start")
+        await send('\n'.join(dup_lines))
     
-    templates = load_button_templates(user_id)
-    if templates:
-        # 🔥 Сразу отправляем НАСТОЯЩИЕ кнопки
-        chat_id = state.get_session(user_id).get('chat_id', user_id)
-        if max_client:
-            await max_client.send_message(
-                chat_id=chat_id,
-                text=f"<b>👁 Предпросмотр кнопок ({len(templates)}):</b>",
-                buttons=[[t] for t in templates],
-                use_html_format=True
-            )
+    # 🔥 Потом добавленное + предпросмотр
+    if added or errors:
+        response = []
+        
+        if added:
+            response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
+            for name, _ in added:
+                response.append(f"• {name}")
+        
+        if errors:
+            response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
+            for e in errors:
+                response.append(f"• {e}")
+        
+        # Предпросмотр кнопок
+        templates = load_button_templates(user_id)
+        if templates:
+            chat_id = state.get_session(user_id).get('chat_id', user_id)
+            if max_client:
+                await max_client.send_message(
+                    chat_id=chat_id,
+                    text=f"<b>👁 Предпросмотр кнопок:</b>",
+                    buttons=[[t] for t in templates],
+                    use_html_format=True
+                )
+        
+        response.append("\n─────────────────")
+        response.append("➕ /btn_add | 📋 /btn_list")
+        response.append("🔙 /templates | 🏠 /start")
+        await send('\n'.join(response))
     
-    response.append("\n─────────────────")
-    response.append("➕ /btn_add | 📋 /btn_list")
-    response.append("🔙 /templates | 🏠 /start")
-    await send('\n'.join(response))
+    if not added and not errors and not duplicates:
+        await send(
+            "❌ Ничего не добавлено.\n\n"
+            "─────────────────\n"
+            "➕ /btn_add | 🔙 /templates | 🏠 /start"
+        )
 
 
 # === ПРОСМОТР И УДАЛЕНИЕ ===
@@ -349,7 +382,6 @@ async def handle_btn_use(user_id, send, state, max_client=None):
         )
         return
     
-    # Предпросмотр с НАСТОЯЩИМИ кнопками
     chat_id = state.get_session(user_id).get('chat_id', user_id)
     if max_client:
         await max_client.send_message(
