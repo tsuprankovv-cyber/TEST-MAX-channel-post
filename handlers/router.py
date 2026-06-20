@@ -37,7 +37,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
                 chat_id=chat_id or user_id,
                 text=text,
                 buttons=buttons,
-                use_html_format=True  # 🔥 Всегда HTML для поддержки <b>, <code>, etc.
+                use_html_format=True
             )
         
         body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
@@ -73,9 +73,9 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         )
         from handlers.templates import (
             handle_templates_menu,
-            handle_inline_add_start, handle_inline_add_name, handle_inline_add_url,
+            handle_inline_add_start, handle_inline_add_name,
             handle_inline_list, handle_inline_del,
-            handle_btn_add_start, handle_btn_add_name, handle_btn_add_url,
+            handle_btn_add_start, handle_btn_add_name,
             handle_btn_list, handle_btn_del,
             handle_btn_use, handle_btn_confirm
         )
@@ -123,7 +123,8 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif cmd == '/cancel':
             state.clear_draft(user_id)
             state.clear_session(user_id)
-            await send(f"<b>🗑️ Сброшено</b>\n\n{help_text()}")
+            await send("<b>🗑️ Черновик удалён</b>")
+            await send(help_text())
         
         elif cmd == '/stats':
             await handle_stats(send, stats)
@@ -157,7 +158,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             await handle_btn_add_start(user_id, send, state)
         
         elif cmd == '/btn_list':
-            await handle_btn_list(user_id, send)
+            await handle_btn_list(user_id, send, max_client)
         
         elif cmd.startswith('/btn_del '):
             await handle_btn_del(user_id, cmd.replace('/btn_del ', ''), send)
@@ -241,7 +242,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         
         elif step == 'post_waiting_buttons':
             if cmd == '/btn_use':
-                await handle_btn_use(user_id, send, state)
+                await handle_btn_use(user_id, send, state, max_client)
             elif cmd == '/skip':
                 await handle_skip(user_id, send, state)
             else:
@@ -270,14 +271,8 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif step == 'inline_add_name':
             await handle_inline_add_name(user_id, text, send, state)
         
-        elif step == 'inline_add_url':
-            await handle_inline_add_url(user_id, text, send, state)
-        
         elif step == 'btn_add_name':
             await handle_btn_add_name(user_id, text, send, state)
-        
-        elif step == 'btn_add_url':
-            await handle_btn_add_url(user_id, text, send, state)
         
         else:
             if auth.is_authorized(user_id):
