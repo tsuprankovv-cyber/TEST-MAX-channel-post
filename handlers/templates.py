@@ -17,8 +17,8 @@ def _load(file_path: Path) -> Dict:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception as e:
-            logger.error(f"[TEMPLATES] Load error: {e}")
+        except Exception:
+            return {}
     return {}
 
 
@@ -26,17 +26,12 @@ def _save(file_path: Path, data: Dict):
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"[TEMPLATES] Save error: {e}")
+    except Exception:
+        pass
 
 
 def parse_name_url(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Умный парсер: Название | https://url
-    Разделители: |, -, —, →, табуляция, пробел
-    """
     separators = [' | ', ' - ', ' — ', ' → ', '\t', ' |', '| ', ' -', '- ', ' —', '— ', ' →', '→ ']
-    
     for sep in separators:
         if sep in text:
             parts = text.split(sep, 1)
@@ -44,22 +39,17 @@ def parse_name_url(text: str) -> Tuple[Optional[str], Optional[str]]:
             url = parts[1].strip()
             if url.startswith(('http://', 'https://')):
                 return name, url
-    
-    # Ищем URL в тексте
     words = text.split()
     for word in words:
         if word.startswith(('http://', 'https://')):
-            name = text.replace(word, '').strip()
-            return name, word
-    
+            return text.replace(word, '').strip(), word
     return None, None
 
 
-# === INLINE-ШАБЛОНЫ ===
+# === INLINE ===
 
 def load_inline_templates(user_id: int) -> List[Dict]:
-    data = _load(INLINE_TEMPLATES_FILE)
-    return data.get(str(user_id), {}).get('templates', [])
+    return _load(INLINE_TEMPLATES_FILE).get(str(user_id), {}).get('templates', [])
 
 
 def save_inline_template(user_id: int, text: str, url: str):
@@ -71,7 +61,7 @@ def save_inline_template(user_id: int, text: str, url: str):
     _save(INLINE_TEMPLATES_FILE, data)
 
 
-def delete_inline_template(user_id: int, index: int):
+def delete_inline_template(user_id: int, index: int) -> bool:
     data = _load(INLINE_TEMPLATES_FILE)
     uid = str(user_id)
     if uid in data and 0 <= index < len(data[uid]['templates']):
@@ -82,19 +72,16 @@ def delete_inline_template(user_id: int, index: int):
 
 
 def find_duplicate_inline(user_id: int, url: str) -> Optional[Dict]:
-    """Проверяет есть ли уже шаблон с таким URL"""
-    templates = load_inline_templates(user_id)
-    for t in templates:
+    for t in load_inline_templates(user_id):
         if t['url'] == url:
             return t
     return None
 
 
-# === BUTTON-ШАБЛОНЫ ===
+# === BUTTONS ===
 
 def load_button_templates(user_id: int) -> List[Dict]:
-    data = _load(BUTTON_TEMPLATES_FILE)
-    return data.get(str(user_id), {}).get('templates', [])
+    return _load(BUTTON_TEMPLATES_FILE).get(str(user_id), {}).get('templates', [])
 
 
 def save_button_template(user_id: int, text: str, url: str):
@@ -106,7 +93,7 @@ def save_button_template(user_id: int, text: str, url: str):
     _save(BUTTON_TEMPLATES_FILE, data)
 
 
-def delete_button_template(user_id: int, index: int):
+def delete_button_template(user_id: int, index: int) -> bool:
     data = _load(BUTTON_TEMPLATES_FILE)
     uid = str(user_id)
     if uid in data and 0 <= index < len(data[uid]['templates']):
@@ -117,9 +104,7 @@ def delete_button_template(user_id: int, index: int):
 
 
 def find_duplicate_button(user_id: int, url: str) -> Optional[Dict]:
-    """Проверяет есть ли уже кнопка с таким URL"""
-    templates = load_button_templates(user_id)
-    for t in templates:
+    for t in load_button_templates(user_id):
         if t['url'] == url:
             return t
     return None
@@ -131,184 +116,145 @@ async def handle_templates_menu(send):
     await send(
         "<b>📋 Управление шаблонами</b>\n\n"
         "<b>🔗 Слова-ссылки:</b>\n"
-        "/inline_add — добавить\n"
-        "/inline_list — список (с предпросмотром)\n"
-        "/inline_del N — удалить\n\n"
+        "➕ /inline_add — добавить\n"
+        "📋 /inline_list — список\n"
+        "🗑 /inline_del N — удалить\n\n"
         "<b>🔘 Кнопки под постом:</b>\n"
-        "/btn_add — добавить\n"
-        "/btn_list — список (с предпросмотром)\n"
-        "/btn_del N — удалить\n\n"
+        "➕ /btn_add — добавить\n"
+        "📋 /btn_list — список\n"
+        "🗑 /btn_del N — удалить\n\n"
         "─────────────────\n"
-        "📝 /post | 👁 /preview | 🔙 /start"
+        "📝 /post | 🏠 /start"
     )
 
 
-# === ДОБАВЛЕНИЕ INLINE (пошагово) ===
+# === ДОБАВЛЕНИЕ ===
 
 async def handle_inline_add_start(user_id, send, state):
-    """Шаг 1: принимает название и ссылку (можно несколько)"""
-    logger.info(f"[INLINE-ADD] user={user_id}")
     state.set_step(user_id, 'inline_add_name')
     await send(
-        "<b>🔗 Новые слова-ссылки</b>\n\n"
+        "<b>➕ Новые слова-ссылки</b>\n\n"
         "Отправьте названия и ссылки:\n"
-        "<code>Название | https://url</code>\n"
-        "<code>Название2 | https://url2</code>\n\n"
-        "Разделители: <code>|</code> <code>-</code> <code>—</code> <code>→</code>\n"
-        "По одной или несколько в одном сообщении.\n\n"
+        "<code>Название | https://url</code>\n\n"
+        "Разделители: <code>|</code> <code>-</code> <code>—</code> <code>→</code>\n\n"
         "─────────────────\n"
         "❌ /cancel — отмена"
     )
 
 
 async def handle_inline_add_name(user_id, text, send, state):
-    """Обрабатывает названия и ссылки"""
-    logger.info(f"[INLINE-ADD] user={user_id} text='{text[:100]}...'")
+    added, duplicates, errors = [], [], []
     
-    added = []
-    duplicates = []
-    errors = []
-    
-    lines = text.strip().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
+    for line in text.strip().split('\n'):
+        if not line.strip():
             continue
-        
         name, url = parse_name_url(line)
-        
         if not name or not url:
             errors.append(line[:50])
             continue
-        
-        # Проверка дубликата
         dup = find_duplicate_inline(user_id, url)
         if dup:
             duplicates.append((name, url, dup['text']))
             continue
-        
         save_inline_template(user_id, name, url)
         added.append((name, url))
     
     state.set_step(user_id, None)
-    
-    # Формируем ответ
     response = []
     
     if added:
         response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
-        for name, url in added:
-            response.append(f"• {name} → {url[:50]}...")
-    
+        for name, _ in added:
+            response.append(f"• {name}")
     if duplicates:
         response.append(f"\n<b>⚠️ Уже есть ({len(duplicates)}):</b>")
-        for name, url, existing in duplicates:
-            response.append(f"• {name} → уже сохранено как «{existing}»")
-    
+        for name, _, existing in duplicates:
+            response.append(f"• {name} → уже «{existing}»")
     if errors:
         response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
         for e in errors:
             response.append(f"• {e}")
     
-    # Показать полный список
     templates = load_inline_templates(user_id)
     if templates:
         response.append(f"\n<b>📋 Все ссылки ({len(templates)}):</b>")
         for i, t in enumerate(templates, 1):
-            response.append(f"{i}. {t['text']} → {t['url'][:40]}...")
-        # Предпросмотр
+            response.append(f"{i}. {t['text']}")
         response.append(f"\n<b>👁 Предпросмотр:</b>")
         response.append("🔗 Полезные ссылки:")
-        for i, t in enumerate(templates, 1):
-            response.append(f"{i}. {t['text']}")
+        for t in templates:
+            response.append(f"• {t['text']} → {t['url'][:40]}...")
     
     response.append("\n─────────────────")
-    response.append("/inline_add — добавить | /inline_list — список")
-    response.append("🔙 /templates — меню шаблонов")
-    
+    response.append("➕ /inline_add | 📋 /inline_list")
+    response.append("🔙 /templates | 🏠 /start")
     await send('\n'.join(response))
 
 
-# === ДОБАВЛЕНИЕ BUTTON (пошагово) ===
-
 async def handle_btn_add_start(user_id, send, state):
-    """Шаг 1: принимает названия и ссылки кнопок"""
-    logger.info(f"[BTN-ADD] user={user_id}")
     state.set_step(user_id, 'btn_add_name')
     await send(
-        "<b>🔘 Новые кнопки</b>\n\n"
+        "<b>➕ Новые кнопки</b>\n\n"
         "Отправьте названия и ссылки:\n"
-        "<code>Название | https://url</code>\n"
-        "<code>Название2 | https://url2</code>\n\n"
-        "Разделители: <code>|</code> <code>-</code> <code>—</code> <code>→</code>\n"
-        "По одной или несколько в одном сообщении.\n\n"
+        "<code>Название | https://url</code>\n\n"
+        "Разделители: <code>|</code> <code>-</code> <code>—</code> <code>→</code>\n\n"
         "─────────────────\n"
         "❌ /cancel — отмена"
     )
 
 
-async def handle_btn_add_name(user_id, text, send, state):
-    """Обрабатывает названия и ссылки кнопок"""
-    logger.info(f"[BTN-ADD] user={user_id} text='{text[:100]}...'")
+async def handle_btn_add_name(user_id, text, send, state, max_client=None):
+    added, duplicates, errors = [], [], []
     
-    added = []
-    duplicates = []
-    errors = []
-    
-    lines = text.strip().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
+    for line in text.strip().split('\n'):
+        if not line.strip():
             continue
-        
         name, url = parse_name_url(line)
-        
         if not name or not url:
             errors.append(line[:50])
             continue
-        
-        # Проверка дубликата
         dup = find_duplicate_button(user_id, url)
         if dup:
             duplicates.append((name, url, dup['text']))
             continue
-        
         save_button_template(user_id, name, url)
         added.append((name, url))
     
     state.set_step(user_id, None)
-    
-    # Формируем ответ
     response = []
     
     if added:
         response.append(f"<b>✅ Добавлено ({len(added)}):</b>")
-        for name, url in added:
+        for name, _ in added:
             response.append(f"• {name}")
-    
     if duplicates:
         response.append(f"\n<b>⚠️ Уже есть ({len(duplicates)}):</b>")
-        for name, url, existing in duplicates:
-            response.append(f"• {name} → уже сохранено как «{existing}»")
-    
+        for name, _, existing in duplicates:
+            response.append(f"• {name} → уже «{existing}»")
     if errors:
         response.append(f"\n<b>❌ Не распознано ({len(errors)}):</b>")
         for e in errors:
             response.append(f"• {e}")
     
-    # Показать полный список
     templates = load_button_templates(user_id)
     if templates:
         response.append(f"\n<b>🔘 Все кнопки ({len(templates)}):</b>")
         for i, t in enumerate(templates, 1):
             response.append(f"{i}. {t['text']}")
+        
+        # Предпросмотр с НАСТОЯЩИМИ кнопками
+        chat_id = state.get_session(user_id).get('chat_id', user_id)
+        if max_client:
+            await max_client.send_message(
+                chat_id=chat_id,
+                text="<b>👁 Предпросмотр кнопок:</b>",
+                buttons=[[t] for t in templates],
+                use_html_format=True
+            )
     
     response.append("\n─────────────────")
-    response.append("/btn_add — добавить | /btn_list — список")
-    response.append("🔙 /templates — меню шаблонов")
-    
+    response.append("➕ /btn_add | 📋 /btn_list")
+    response.append("🔙 /templates | 🏠 /start")
     await send('\n'.join(response))
 
 
@@ -317,34 +263,27 @@ async def handle_btn_add_name(user_id, text, send, state):
 async def handle_inline_list(user_id, send):
     templates = load_inline_templates(user_id)
     if not templates:
-        await send(
-            "📋 Список пуст\n\n"
-            "─────────────────\n"
-            "/inline_add — добавить | 🔙 /templates"
-        )
+        await send("📋 Список пуст\n\n─────────────────\n➕ /inline_add | 🔙 /templates | 🏠 /start")
         return
     
     lines = ["<b>📋 Слова-ссылки:</b>\n"]
     for i, t in enumerate(templates, 1):
-        lines.append(f"{i}. {t['text']} → {t['url'][:40]}...")
-    
-    # Предпросмотр готового вида
-    lines.append(f"\n<b>👁 Предпросмотр:</b>")
-    lines.append("🔗 Полезные ссылки:")
-    for i, t in enumerate(templates, 1):
         lines.append(f"{i}. {t['text']}")
-    
+    lines.append(f"\n<b>👁 Предпросмотр:</b>\n🔗 Полезные ссылки:")
+    for t in templates:
+        lines.append(f"• {t['text']} → {t['url'][:40]}...")
     lines.append("\n─────────────────")
-    lines.append("/inline_add | /inline_del N | 🔙 /templates")
+    lines.append("➕ /inline_add | 🗑 /inline_del N")
+    lines.append("🔙 /templates | 🏠 /start")
     await send('\n'.join(lines))
 
 
 async def handle_inline_del(user_id, index_str, send):
     try:
-        index = int(index_str) - 1  # Пользователь вводит с 1
+        index = int(index_str) - 1
         if delete_inline_template(user_id, index):
             templates = load_inline_templates(user_id)
-            lines = [f"<b>✅ Удалён шаблон #{index + 1}</b>\n"]
+            lines = [f"<b>✅ Удалён #{index + 1}</b>\n"]
             if templates:
                 lines.append("<b>📋 Остались:</b>")
                 for i, t in enumerate(templates, 1):
@@ -352,39 +291,36 @@ async def handle_inline_del(user_id, index_str, send):
             else:
                 lines.append("📋 Список пуст")
             lines.append("\n─────────────────")
-            lines.append("/inline_add | /inline_list | 🔙 /templates")
+            lines.append("➕ /inline_add | 📋 /inline_list")
+            lines.append("🔙 /templates | 🏠 /start")
             await send('\n'.join(lines))
         else:
-            await send("❌ Неверный номер\n/inline_list — посмотреть список")
+            await send("❌ Неверный номер")
     except ValueError:
-        await send("❌ Укажите номер: /inline_del 1\n/inline_list — посмотреть список")
+        await send("❌ Укажите номер: /inline_del 1")
 
 
 async def handle_btn_list(user_id, send, max_client=None):
     templates = load_button_templates(user_id)
     if not templates:
-        await send(
-            "📋 Список пуст\n\n"
-            "─────────────────\n"
-            "/btn_add — добавить | 🔙 /templates"
-        )
+        await send("📋 Список пуст\n\n─────────────────\n➕ /btn_add | 🔙 /templates | 🏠 /start")
         return
     
-    lines = ["<b>🔘 Кнопки под постом:</b>\n"]
+    lines = ["<b>🔘 Кнопки:</b>\n"]
     for i, t in enumerate(templates, 1):
-        lines.append(f"{i}. {t['text']} → {t['url'][:40]}...")
-    
+        lines.append(f"{i}. {t['text']}")
     lines.append("\n─────────────────")
-    lines.append("/btn_add | /btn_del N | 🔙 /templates")
+    lines.append("➕ /btn_add | 🗑 /btn_del N")
+    lines.append("🔙 /templates | 🏠 /start")
     await send('\n'.join(lines))
 
 
 async def handle_btn_del(user_id, index_str, send):
     try:
-        index = int(index_str) - 1  # Пользователь вводит с 1
+        index = int(index_str) - 1
         if delete_button_template(user_id, index):
             templates = load_button_templates(user_id)
-            lines = [f"<b>✅ Удалён шаблон #{index + 1}</b>\n"]
+            lines = [f"<b>✅ Удалён #{index + 1}</b>\n"]
             if templates:
                 lines.append("<b>🔘 Остались:</b>")
                 for i, t in enumerate(templates, 1):
@@ -392,46 +328,40 @@ async def handle_btn_del(user_id, index_str, send):
             else:
                 lines.append("🔘 Список пуст")
             lines.append("\n─────────────────")
-            lines.append("/btn_add | /btn_list | 🔙 /templates")
+            lines.append("➕ /btn_add | 📋 /btn_list")
+            lines.append("🔙 /templates | 🏠 /start")
             await send('\n'.join(lines))
         else:
-            await send("❌ Неверный номер\n/btn_list — посмотреть список")
+            await send("❌ Неверный номер")
     except ValueError:
-        await send("❌ Укажите номер: /btn_del 1\n/btn_list — посмотреть список")
+        await send("❌ Укажите номер: /btn_del 1")
 
 
-# === ИСПОЛЬЗОВАНИЕ ШАБЛОНОВ ===
+# === ИСПОЛЬЗОВАНИЕ ===
 
 async def handle_btn_use(user_id, send, state, max_client=None):
-    logger.info(f"[BTN-USE] user={user_id}")
-    
     templates = load_button_templates(user_id)
     
     if not templates:
         await send(
             "❌ Нет сохранённых кнопок\n\n"
-            "Введите кнопки вручную:\n"
-            "<code>Название | https://url</code>\n\n"
+            "Введите вручную: <code>Название | https://url</code>\n\n"
             "─────────────────\n"
             "⏭ /skip | ❌ /cancel"
         )
         return
     
-    names_list = '\n'.join([f"{i}. {t['text']}" for i, t in enumerate(templates, 1)])
-    
-    # Отправляем сообщение с НАСТОЯЩИМИ кнопками для предпросмотра
+    # Предпросмотр с НАСТОЯЩИМИ кнопками
     chat_id = state.get_session(user_id).get('chat_id', user_id)
     if max_client:
         await max_client.send_message(
             chat_id=chat_id,
-            text=f"<b>🔘 Предпросмотр кнопок:</b>",
+            text="<b>👁 Предпросмотр кнопок:</b>",
             buttons=[[t] for t in templates],
             use_html_format=True
         )
     
     await send(
-        f"<b>🔘 Будут добавлены кнопки ({len(templates)}):</b>\n\n"
-        f"{names_list}\n\n"
         "─────────────────\n"
         "✅ /btn_yes — добавить\n"
         "❌ /skip — пропустить"
@@ -441,13 +371,11 @@ async def handle_btn_use(user_id, send, state, max_client=None):
 
 
 async def handle_btn_confirm(user_id, send, state, max_client=None):
-    logger.info(f"[BTN-CONFIRM] user={user_id}")
-    
     session = state.get_session_data(user_id)
     templates = session.get('pending_buttons', [])
     
     if not templates:
-        await send("❌ Нет данных для добавления")
+        await send("❌ Нет данных")
         state.set_step(user_id, 'post_waiting_buttons')
         return
     
