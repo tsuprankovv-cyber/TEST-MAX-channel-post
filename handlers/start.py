@@ -12,8 +12,18 @@ def help_text() -> str:
         "📝 /post — создать пост\n"
         "👁 /preview — предпросмотр\n"
         "📊 /stats — статистика\n"
-        "⚙️ /settings — настройки\n"
-        "❌ /cancel — сброс"
+        "📋 /templates — шаблоны\n"
+        "⚙️ /settings — настройки"
+    )
+
+
+def settings_text() -> str:
+    return (
+        "─────────────────\n"
+        "📋 /templates — шаблоны\n"
+        "🔑 /set_password — сменить пароль\n"
+        "👥 /list_admins — админы\n"
+        "🔙 /start — главное меню"
     )
 
 
