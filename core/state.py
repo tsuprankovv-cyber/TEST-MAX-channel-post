@@ -17,11 +17,9 @@ class StateManager:
         'post_waiting_buttons',
         'post_waiting_buttons_confirm',
         'post_ready',
-        # 🔥 Новые шаги для добавления шаблонов
+        # Шаги добавления шаблонов
         'inline_add_name',
-        'inline_add_url',
         'btn_add_name',
-        'btn_add_url',
     ]
     
     def __init__(self):
