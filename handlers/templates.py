@@ -73,7 +73,7 @@ def delete_inline_template(user_id: int, index: int):
 
 # === BUTTON-ШАБЛОНЫ (кнопки под постом) ===
 
-def load_button_templates(user_id: int) -> List[List[Dict]]:
+def load_button_templates(user_id: int) -> List[Dict]:
     """Загружает шаблоны кнопок для пользователя"""
     data = _load(BUTTON_TEMPLATES_FILE)
     user_data = data.get(str(user_id), {})
@@ -82,7 +82,7 @@ def load_button_templates(user_id: int) -> List[List[Dict]]:
     return templates
 
 
-def save_button_template(user_id: int, text: str, url: str, style: str = "primary"):
+def save_button_template(user_id: int, text: str, url: str):
     """Сохраняет шаблон кнопки"""
     data = _load(BUTTON_TEMPLATES_FILE)
     user_id_str = str(user_id)
@@ -112,47 +112,131 @@ def delete_button_template(user_id: int, index: int):
     return False
 
 
+# === МЕНЮ ШАБЛОНОВ ===
+
 async def handle_templates_menu(send):
     """Меню управления шаблонами"""
     await send(
         "📋 **Управление шаблонами**\n\n"
         "🔗 **Слова-ссылки:**\n"
-        "/inline_add Название | url — добавить\n"
+        "/inline_add — добавить\n"
         "/inline_list — список\n"
         "/inline_del N — удалить\n\n"
         "🔘 **Кнопки под постом:**\n"
-        "/btn_add Название | url — добавить\n"
+        "/btn_add — добавить\n"
         "/btn_list — список\n"
         "/btn_del N — удалить\n\n"
-        "🎨 **Цвет кнопок:**\n"
-        "/test_colors — тест цветов"
+        "🔙 /start — главное меню"
     )
 
 
-async def handle_inline_add(user_id, text, send):
-    """Добавляет шаблон слова-ссылки"""
-    for sep in [' | ', ' - ', ' → ']:
-        if sep in text:
-            parts = text.split(sep, 1)
-            link_text = parts[0].strip()
-            link_url = parts[1].strip()
-            if link_text and link_url.startswith(('http://', 'https://')):
-                save_inline_template(user_id, link_text, link_url)
-                await send(f"✅ Добавлено: [{link_text}]({link_url[:40]}...)")
-                return
-    await send("❌ Формат: /inline_add Название | https://url")
+# === ДОБАВЛЕНИЕ INLINE-ШАБЛОНА (пошагово) ===
 
+async def handle_inline_add_start(user_id, send, state):
+    """Шаг 1: запрашивает название ссылки"""
+    logger.info(f"[INLINE-ADD] user={user_id} — asking name")
+    state.set_step(user_id, 'inline_add_name')
+    await send("🔗 Введите **название** ссылки:\n❌ /cancel")
+
+
+async def handle_inline_add_name(user_id, text, send, state):
+    """Шаг 2: сохраняет название и запрашивает URL"""
+    name = text.strip()
+    if not name:
+        await send("❌ Название не может быть пустым\nВведите название:")
+        return
+    
+    logger.info(f"[INLINE-ADD] user={user_id} name='{name}'")
+    state.set_step(user_id, 'inline_add_url', {'new_inline_name': name})
+    await send(f"🔗 Название: **{name}**\n\nВведите **URL** (https://...):\n❌ /cancel")
+
+
+async def handle_inline_add_url(user_id, text, send, state):
+    """Шаг 3: сохраняет URL и показывает список"""
+    session = state.get_session_data(user_id)
+    name = session.get('new_inline_name', '')
+    url = text.strip()
+    
+    if not url.startswith(('http://', 'https://')):
+        await send("❌ URL должен начинаться с http:// или https://\nВведите URL ещё раз:")
+        return
+    
+    logger.info(f"[INLINE-ADD] user={user_id} url='{url[:50]}...'")
+    
+    save_inline_template(user_id, name, url)
+    state.set_step(user_id, None)  # Сброс шага
+    
+    # Показать обновлённый список
+    templates = load_inline_templates(user_id)
+    lines = [f"✅ Добавлено: **{name}**\n"]
+    lines.append("📋 **Слова-ссылки:**")
+    for i, t in enumerate(templates):
+        lines.append(f"{i}. {t['text']}")
+    lines.append("\n/inline_add — добавить | /inline_list — список\n🔙 /templates — меню шаблонов")
+    
+    await send('\n'.join(lines))
+
+
+# === ДОБАВЛЕНИЕ BUTTON-ШАБЛОНА (пошагово) ===
+
+async def handle_btn_add_start(user_id, send, state):
+    """Шаг 1: запрашивает название кнопки"""
+    logger.info(f"[BTN-ADD] user={user_id} — asking name")
+    state.set_step(user_id, 'btn_add_name')
+    await send("🔘 Введите **название** кнопки:\n❌ /cancel")
+
+
+async def handle_btn_add_name(user_id, text, send, state):
+    """Шаг 2: сохраняет название и запрашивает URL"""
+    name = text.strip()
+    if not name:
+        await send("❌ Название не может быть пустым\nВведите название:")
+        return
+    
+    logger.info(f"[BTN-ADD] user={user_id} name='{name}'")
+    state.set_step(user_id, 'btn_add_url', {'new_btn_name': name})
+    await send(f"🔘 Название: **{name}**\n\nВведите **URL** (https://...):\n❌ /cancel")
+
+
+async def handle_btn_add_url(user_id, text, send, state):
+    """Шаг 3: сохраняет URL и показывает список"""
+    session = state.get_session_data(user_id)
+    name = session.get('new_btn_name', '')
+    url = text.strip()
+    
+    if not url.startswith(('http://', 'https://')):
+        await send("❌ URL должен начинаться с http:// или https://\nВведите URL ещё раз:")
+        return
+    
+    logger.info(f"[BTN-ADD] user={user_id} url='{url[:50]}...'")
+    
+    save_button_template(user_id, name, url)
+    state.set_step(user_id, None)  # Сброс шага
+    
+    # Показать обновлённый список
+    templates = load_button_templates(user_id)
+    lines = [f"✅ Кнопка добавлена: **{name}**\n"]
+    lines.append("🔘 **Кнопки:**")
+    for i, t in enumerate(templates):
+        lines.append(f"{i}. {t['text']}")
+    lines.append("\n/btn_add — добавить | /btn_list — список\n🔙 /templates — меню шаблонов")
+    
+    await send('\n'.join(lines))
+
+
+# === ПРОСМОТР И УДАЛЕНИЕ ===
 
 async def handle_inline_list(user_id, send):
     """Показывает список шаблонов слов-ссылок"""
     templates = load_inline_templates(user_id)
     if not templates:
-        await send("📋 Список пуст")
+        await send("📋 Список пуст\n\n/inline_add — добавить | 🔙 /templates")
         return
     
     lines = ["📋 **Слова-ссылки:**\n"]
     for i, t in enumerate(templates):
-        lines.append(f"{i}. [{t['text']}]({t['url'][:40]}...)")
+        lines.append(f"{i}. {t['text']} → {t['url'][:40]}...")
+    lines.append("\n/inline_add — добавить | /inline_del N — удалить\n🔙 /templates")
     await send('\n'.join(lines))
 
 
@@ -161,37 +245,33 @@ async def handle_inline_del(user_id, index_str, send):
     try:
         index = int(index_str)
         if delete_inline_template(user_id, index):
-            await send(f"✅ Удалён шаблон #{index}")
+            templates = load_inline_templates(user_id)
+            lines = [f"✅ Удалён шаблон #{index}\n"]
+            if templates:
+                lines.append("📋 Остались:")
+                for i, t in enumerate(templates):
+                    lines.append(f"{i}. {t['text']}")
+            else:
+                lines.append("📋 Список пуст")
+            lines.append("\n/inline_add | /inline_list | 🔙 /templates")
+            await send('\n'.join(lines))
         else:
-            await send("❌ Неверный номер")
+            await send("❌ Неверный номер\n/inline_list — посмотреть список")
     except ValueError:
-        await send("❌ Укажите номер: /inline_del 0")
-
-
-async def handle_btn_add(user_id, text, send):
-    """Добавляет шаблон кнопки"""
-    for sep in [' | ', ' - ', ' → ']:
-        if sep in text:
-            parts = text.split(sep, 1)
-            btn_text = parts[0].strip()
-            btn_url = parts[1].strip()
-            if btn_text and btn_url.startswith(('http://', 'https://')):
-                save_button_template(user_id, btn_text, btn_url)
-                await send(f"✅ Кнопка: {btn_text} → {btn_url[:40]}...")
-                return
-    await send("❌ Формат: /btn_add Название | https://url")
+        await send("❌ Укажите номер: /inline_del 0\n/inline_list — посмотреть список")
 
 
 async def handle_btn_list(user_id, send):
     """Показывает список шаблонов кнопок"""
     templates = load_button_templates(user_id)
     if not templates:
-        await send("📋 Список пуст")
+        await send("📋 Список пуст\n\n/btn_add — добавить | 🔙 /templates")
         return
     
     lines = ["🔘 **Кнопки под постом:**\n"]
     for i, t in enumerate(templates):
         lines.append(f"{i}. {t['text']} → {t['url'][:40]}...")
+    lines.append("\n/btn_add — добавить | /btn_del N — удалить\n🔙 /templates")
     await send('\n'.join(lines))
 
 
@@ -200,12 +280,23 @@ async def handle_btn_del(user_id, index_str, send):
     try:
         index = int(index_str)
         if delete_button_template(user_id, index):
-            await send(f"✅ Удалён шаблон #{index}")
+            templates = load_button_templates(user_id)
+            lines = [f"✅ Удалён шаблон #{index}\n"]
+            if templates:
+                lines.append("🔘 Остались:")
+                for i, t in enumerate(templates):
+                    lines.append(f"{i}. {t['text']}")
+            else:
+                lines.append("🔘 Список пуст")
+            lines.append("\n/btn_add | /btn_list | 🔙 /templates")
+            await send('\n'.join(lines))
         else:
-            await send("❌ Неверный номер")
+            await send("❌ Неверный номер\n/btn_list — посмотреть список")
     except ValueError:
-        await send("❌ Укажите номер: /btn_del 0")
+        await send("❌ Укажите номер: /btn_del 0\n/btn_list — посмотреть список")
 
+
+# === ИСПОЛЬЗОВАНИЕ ШАБЛОНОВ ===
 
 async def handle_btn_use(user_id, send, state):
     """Использовать сохранённые шаблоны кнопок — с подтверждением"""
@@ -214,7 +305,7 @@ async def handle_btn_use(user_id, send, state):
     templates = load_button_templates(user_id)
     
     if not templates:
-        await send("❌ Нет сохранённых кнопок\nВведите кнопки вручную:")
+        await send("❌ Нет сохранённых кнопок\nВведите кнопки вручную или /skip")
         return
     
     # Показываем что будет добавлено
