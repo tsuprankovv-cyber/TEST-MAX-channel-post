@@ -272,7 +272,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             await handle_inline_add_name(user_id, text, send, state)
         
         elif step == 'btn_add_name':
-            await handle_btn_add_name(user_id, text, send, state)
+            await handle_btn_add_name(user_id, text, send, state, max_client)
         
         else:
             if auth.is_authorized(user_id):
