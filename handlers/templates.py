@@ -180,10 +180,12 @@ async def handle_inline_add_name(user_id, text, send, state):
         response.append(f"\n<b>📋 Все ссылки ({len(templates)}):</b>")
         for i, t in enumerate(templates, 1):
             response.append(f"{i}. {t['text']}")
+        
+        # 🔥 Предпросмотр с КЛИКАБЕЛЬНЫМИ ссылками
         response.append(f"\n<b>👁 Предпросмотр:</b>")
         response.append("🔗 Полезные ссылки:")
         for t in templates:
-            response.append(f"• {t['text']} → {t['url'][:40]}...")
+            response.append(f"• <a href=\"{t['url']}\">{t['text']}</a>")
     
     response.append("\n─────────────────")
     response.append("➕ /inline_add | 📋 /inline_list")
@@ -238,16 +240,12 @@ async def handle_btn_add_name(user_id, text, send, state, max_client=None):
     
     templates = load_button_templates(user_id)
     if templates:
-        response.append(f"\n<b>🔘 Все кнопки ({len(templates)}):</b>")
-        for i, t in enumerate(templates, 1):
-            response.append(f"{i}. {t['text']}")
-        
-        # Предпросмотр с НАСТОЯЩИМИ кнопками
+        # 🔥 Сразу отправляем НАСТОЯЩИЕ кнопки
         chat_id = state.get_session(user_id).get('chat_id', user_id)
         if max_client:
             await max_client.send_message(
                 chat_id=chat_id,
-                text="<b>👁 Предпросмотр кнопок:</b>",
+                text=f"<b>👁 Предпросмотр кнопок ({len(templates)}):</b>",
                 buttons=[[t] for t in templates],
                 use_html_format=True
             )
@@ -271,7 +269,7 @@ async def handle_inline_list(user_id, send):
         lines.append(f"{i}. {t['text']}")
     lines.append(f"\n<b>👁 Предпросмотр:</b>\n🔗 Полезные ссылки:")
     for t in templates:
-        lines.append(f"• {t['text']} → {t['url'][:40]}...")
+        lines.append(f"• <a href=\"{t['url']}\">{t['text']}</a>")
     lines.append("\n─────────────────")
     lines.append("➕ /inline_add | 🗑 /inline_del N")
     lines.append("🔙 /templates | 🏠 /start")
