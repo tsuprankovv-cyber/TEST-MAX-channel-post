@@ -9,7 +9,6 @@ logger = get_logger(__name__)
 
 
 def parse_inline_links(text: str) -> List[Dict]:
-    """Парсит слова-ссылки из формата: [текст](url)"""
     links = []
     pattern = r'\[(.+?)\]\((https?://[^\s)]+)\)'
     for match in re.finditer(pattern, text):
@@ -18,21 +17,11 @@ def parse_inline_links(text: str) -> List[Dict]:
 
 
 def apply_inline_links(text: str) -> str:
-    """Конвертирует [текст](url) → <a href="url">текст</a>"""
     pattern = r'\[(.+?)\]\((https?://[^\s)]+)\)'
     return re.sub(pattern, r'<a href="\2">\1</a>', text)
 
 
-def preview_inline_links(templates: List[Dict]) -> str:
-    """Показывает как будет выглядеть блок ссылок в посте"""
-    preview = "🔗 Полезные ссылки:\n"
-    for i, t in enumerate(templates, 1):
-        preview += f"{i}. {t['text']}\n"
-    return preview
-
-
 async def handle_inline_text(user_id, text, send, state, max_client=None):
-    """Обрабатывает введённые слова-ссылки"""
     logger.info(f"[INLINE-TEXT] user={user_id}")
     
     session = state.get_session_data(user_id)
@@ -41,8 +30,8 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
     if links:
         current_text = session.get('text', '')
         inline_block = '\n\n🔗 Полезные ссылки:\n'
-        for i, link in enumerate(links, 1):
-            inline_block += f'{i}. [{link["text"]}]({link["url"]})\n'
+        for link in links:
+            inline_block += f'• [{link["text"]}]({link["url"]})\n'
         
         session['text'] = current_text + inline_block
         session['text'] = apply_inline_links(session['text'])
@@ -52,8 +41,8 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
     await send(
         "<b>✅ Ссылки добавлены</b>\n\n"
         "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
-        "Формат: <code>Название | https://url</code>\n"
-        "📋 /btn_use — шаблоны\n\n"
+        "Вручную: <code>Название | https://url</code>\n"
+        "📋 /btn_use — использовать шаблоны\n\n"
         "─────────────────\n"
         "⏭ /skip — пропустить\n"
         "❌ /cancel — отмена"
@@ -61,7 +50,6 @@ async def handle_inline_text(user_id, text, send, state, max_client=None):
 
 
 async def handle_inline_use(user_id, send, state, max_client=None):
-    """Использовать сохранённые шаблоны слов-ссылок"""
     logger.info(f"[INLINE-USE] user={user_id}")
     
     from handlers.templates import load_inline_templates
@@ -70,52 +58,42 @@ async def handle_inline_use(user_id, send, state, max_client=None):
     if not templates:
         await send(
             "❌ Нет сохранённых шаблонов\n\n"
-            "Введите слова-ссылки вручную:\n"
-            "<code>[слово](https://url)</code>\n\n"
+            "Введите вручную: <code>[слово](https://url)</code>\n\n"
             "─────────────────\n"
             "⏭ /skip | ❌ /cancel"
         )
         return
     
-    names_list = '\n'.join([f"{i}. {t['text']} → {t['url'][:40]}..." for i, t in enumerate(templates, 1)])
-    preview_block = preview_inline_links(templates)
+    # Только готовый предпросмотр с кликабельными ссылками
+    preview_text = "<b>👁 Предпросмотр ссылок:</b>\n🔗 Полезные ссылки:\n"
+    for t in templates:
+        preview_text += f"• <a href=\"{t['url']}\">{t['text']}</a>\n"
     
-    await send(
-        f"<b>🔗 Будут добавлены ({len(templates)}):</b>\n\n"
-        f"{names_list}\n\n"
-        f"<b>👁 Так будет выглядеть в посте:</b>\n"
-        f"{preview_block}\n"
-        "─────────────────\n"
-        "✅ /inline_yes — добавить\n"
-        "❌ /skip — пропустить"
-    )
+    preview_text += "\n─────────────────\n"
+    preview_text += "✅ /inline_yes — добавить\n"
+    preview_text += "❌ /skip — пропустить"
     
+    await send(preview_text)
     state.set_step(user_id, 'post_waiting_inline_confirm', {'pending_inline': templates})
 
 
 async def handle_inline_confirm(user_id, send, state, max_client=None):
-    """Подтверждение добавления слов-ссылок"""
     logger.info(f"[INLINE-CONFIRM] user={user_id}")
     
     session = state.get_session_data(user_id)
     templates = session.get('pending_inline', [])
     
     if not templates:
-        await send("❌ Нет данных для добавления")
+        await send("❌ Нет данных")
         state.set_step(user_id, 'post_waiting_buttons')
         return
     
     current_text = session.get('text', '')
-    
     inline_block = '\n\n🔗 Полезные ссылки:\n'
-    for i, t in enumerate(templates, 1):
-        inline_block += f'{i}. [{t["text"]}]({t["url"]})\n'
+    for t in templates:
+        inline_block += f'• [{t["text"]}]({t["url"]})\n'
     
-    if current_text:
-        session['text'] = current_text + inline_block
-    else:
-        session['text'] = inline_block
-    
+    session['text'] = (current_text + inline_block) if current_text else inline_block
     session['text'] = apply_inline_links(session['text'])
     session['inline_links'] = templates
     session.pop('pending_inline', None)
@@ -124,6 +102,7 @@ async def handle_inline_confirm(user_id, send, state, max_client=None):
     await send(
         f"<b>✅ Добавлено {len(templates)} ссылок</b>\n\n"
         "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+        "Вручную: <code>Название | https://url</code>\n"
         "📋 /btn_use — шаблоны\n\n"
         "─────────────────\n"
         "⏭ /skip — пропустить\n"
