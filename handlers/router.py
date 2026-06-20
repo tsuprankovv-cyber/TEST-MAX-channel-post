@@ -72,8 +72,10 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         )
         from handlers.templates import (
             handle_templates_menu,
-            handle_inline_add, handle_inline_list, handle_inline_del,
-            handle_btn_add, handle_btn_list, handle_btn_del,
+            handle_inline_add_start, handle_inline_add_name, handle_inline_add_url,
+            handle_inline_list, handle_inline_del,
+            handle_btn_add_start, handle_btn_add_name, handle_btn_add_url,
+            handle_btn_list, handle_btn_del,
             handle_btn_use, handle_btn_confirm
         )
         
@@ -141,8 +143,8 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif cmd == '/templates':
             await handle_templates_menu(send)
         
-        elif cmd.startswith('/inline_add '):
-            await handle_inline_add(user_id, cmd.replace('/inline_add ', ''), send)
+        elif cmd == '/inline_add':
+            await handle_inline_add_start(user_id, send, state)
         
         elif cmd == '/inline_list':
             await handle_inline_list(user_id, send)
@@ -150,46 +152,14 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif cmd.startswith('/inline_del '):
             await handle_inline_del(user_id, cmd.replace('/inline_del ', ''), send)
         
-        elif cmd.startswith('/btn_add '):
-            await handle_btn_add(user_id, cmd.replace('/btn_add ', ''), send)
+        elif cmd == '/btn_add':
+            await handle_btn_add_start(user_id, send, state)
         
         elif cmd == '/btn_list':
             await handle_btn_list(user_id, send)
         
         elif cmd.startswith('/btn_del '):
             await handle_btn_del(user_id, cmd.replace('/btn_del ', ''), send)
-        
-        # === ТЕСТ ЦВЕТОВ ===
-        elif cmd == '/test_colors':
-            logger.info("[TEST-COLORS] 🎨 Testing button colors...")
-            await send("🎨 Отправляю 5 тестовых кнопок в канал...")
-            
-            colors = [
-                ("#00747A", "Бирюзовый"),
-                ("#F4991A", "Оранжевый"),
-                ("#FDC30B", "Жёлтый"),
-                ("primary", "Синий (primary)"),
-                ("success", "Зелёный (success)"),
-            ]
-            
-            for color, name in colors:
-                btn_data = {"type": "link", "text": f"Кнопка {name}", "url": "https://ya.ru"}
-                if color.startswith('#'):
-                    btn_data['color'] = color
-                else:
-                    btn_data['style'] = color
-                
-                result = await max_client.send_message(
-                    chat_id=channel_id,
-                    text=f"🎨 Тест: {name} ({color})",
-                    buttons=[[btn_data]]
-                )
-                
-                resp_btn = result.get('message', {}).get('body', {}).get('attachments', [])
-                logger.info(f"[TEST-COLORS] {name} ({color}): {json.dumps(resp_btn, ensure_ascii=False)[:200]}")
-                await asyncio.sleep(0.5)
-            
-            await send("✅ Готово! Проверь канал и скажи какие цвета сработали.")
         
         # === ОБРАБОТКА ПО ШАГАМ ===
         elif step == 'waiting_password':
@@ -244,6 +214,19 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif step == 'post_ready':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
             await send_preview(user_id, send, state, max_client)
+        
+        # 🔥 Новые шаги для добавления шаблонов
+        elif step == 'inline_add_name':
+            await handle_inline_add_name(user_id, text, send, state)
+        
+        elif step == 'inline_add_url':
+            await handle_inline_add_url(user_id, text, send, state)
+        
+        elif step == 'btn_add_name':
+            await handle_btn_add_name(user_id, text, send, state)
+        
+        elif step == 'btn_add_url':
+            await handle_btn_add_url(user_id, text, send, state)
         
         else:
             if auth.is_authorized(user_id):
