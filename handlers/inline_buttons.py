@@ -64,7 +64,7 @@ async def handle_inline_use(user_id, send, state, max_client=None):
         )
         return
     
-    # Только готовый предпросмотр с кликабельными ссылками
+    # 🔥 Предпросмотр с КЛИКАБЕЛЬНЫМИ ссылками
     preview_text = "<b>👁 Предпросмотр ссылок:</b>\n🔗 Полезные ссылки:\n"
     for t in templates:
         preview_text += f"• <a href=\"{t['url']}\">{t['text']}</a>\n"
