@@ -3,7 +3,6 @@
 """
 from core.formatter import markup_to_html
 from handlers.buttons import parse_buttons
-from handlers.inline_buttons import apply_inline_links
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -17,7 +16,13 @@ async def handle_post_command(user_id, send, auth, state):
     logger.info(f"[POST] /post user={user_id}")
     state.clear_session(user_id)
     state.set_step(user_id, 'post_waiting_photo')
-    await send("📸 Шаг 1/4: Отправьте фото/видео\n⏭ /skip | ❌ /cancel")
+    await send(
+        "<b>📸 Шаг 1/4: Отправьте фото/видео</b>\n\n"
+        "Просто прикрепите фото или видео к сообщению.\n\n"
+        "─────────────────\n"
+        "⏭ /skip — пропустить\n"
+        "❌ /cancel — отмена"
+    )
 
 
 async def handle_post_photo(user_id, raw_attachments, send, state, media_mgr):
@@ -29,7 +34,14 @@ async def handle_post_photo(user_id, raw_attachments, send, state, media_mgr):
     session['attachments'] = attachments
     
     state.set_step(user_id, 'post_waiting_text')
-    await send(f"✅ Фото ({len(attachments)} шт.)\n📝 Шаг 2/4: Напишите текст\n⏭ /skip | ❌ /cancel")
+    await send(
+        f"<b>✅ Фото получено ({len(attachments)} шт.)</b>\n\n"
+        "<b>📝 Шаг 2/4: Напишите текст</b>\n\n"
+        "Используйте форматирование MAX (жирный, курсив, ссылки).\n\n"
+        "─────────────────\n"
+        "⏭ /skip — пропустить\n"
+        "❌ /cancel — отмена"
+    )
 
 
 async def handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr):
@@ -52,16 +64,16 @@ async def handle_post_text(user_id, text, markup, raw_attachments, send, state, 
     session['raw_text'] = text
     session['markup'] = markup
     
-    # Переходим к шагу 3: слова-ссылки
     state.set_step(user_id, 'post_waiting_inline')
     await send(
-        "🔗 Шаг 3/4: Добавьте слова-ссылки в текст\n\n"
-        "Формат: [слово](https://url)\n\n"
-        "Пример:\n"
-        "[Наш сайт](https://example.com)\n"
-        "[Каталог](https://example.com/catalog)\n\n"
+        "<b>✅ Текст сохранён</b>\n\n"
+        "<b>🔗 Шаг 3/4: Добавьте слова-ссылки</b>\n\n"
+        "Вручную: <code>[слово](https://url)</code>\n"
+        "Пример: <code>[Наш сайт](https://example.com)</code>\n\n"
+        "Или используйте сохранённые:\n"
+        "📋 /inline_use — вставить шаблоны\n\n"
+        "─────────────────\n"
         "⏭ /skip — пропустить\n"
-        "📋 /inline_use — использовать сохранённые\n"
         "❌ /cancel — отмена"
     )
 
@@ -84,25 +96,45 @@ async def handle_skip(user_id, send, state):
     
     if step == 'post_waiting_photo':
         state.set_step(user_id, 'post_waiting_text')
-        await send("📝 Шаг 2/4: Напишите текст\n⏭ /skip | ❌ /cancel")
+        await send(
+            "<b>📝 Шаг 2/4: Напишите текст</b>\n\n"
+            "Используйте форматирование MAX.\n\n"
+            "─────────────────\n"
+            "⏭ /skip — пропустить\n"
+            "❌ /cancel — отмена"
+        )
     
     elif step == 'post_waiting_text':
         state.set_step(user_id, 'post_waiting_inline')
         await send(
-            "🔗 Шаг 3/4: Добавьте слова-ссылки в текст\n\n"
-            "Формат: [слово](https://url)\n\n"
+            "<b>🔗 Шаг 3/4: Добавьте слова-ссылки</b>\n\n"
+            "Вручную: <code>[слово](https://url)</code>\n"
+            "📋 /inline_use — шаблоны\n\n"
+            "─────────────────\n"
             "⏭ /skip — пропустить\n"
-            "📋 /inline_use — использовать сохранённые\n"
             "❌ /cancel — отмена"
         )
     
     elif step == 'post_waiting_inline':
         state.set_step(user_id, 'post_waiting_buttons')
-        await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+        await send(
+            "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+            "Формат: <code>Название | https://url</code>\n"
+            "📋 /btn_use — шаблоны\n\n"
+            "─────────────────\n"
+            "⏭ /skip — пропустить\n"
+            "❌ /cancel — отмена"
+        )
     
     elif step == 'post_waiting_inline_confirm':
         state.set_step(user_id, 'post_waiting_buttons')
-        await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+        await send(
+            "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+            "📋 /btn_use — шаблоны\n\n"
+            "─────────────────\n"
+            "⏭ /skip — пропустить\n"
+            "❌ /cancel — отмена"
+        )
     
     elif step == 'post_waiting_buttons':
         session = state.get_session_data(user_id)
