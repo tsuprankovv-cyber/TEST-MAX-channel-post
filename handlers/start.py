@@ -8,6 +8,7 @@ logger = get_logger(__name__)
 
 def help_text() -> str:
     return (
+        "─────────────────\n"
         "📝 /post — создать пост\n"
         "👁 /preview — предпросмотр\n"
         "📊 /stats — статистика\n"
@@ -25,4 +26,4 @@ async def handle_start(user_id, chat_id, send, auth, state):
         return
     
     state.clear_session(user_id)
-    await send(f"👋 MAX Channel Poster\n\n{help_text()}")
+    await send(f"<b>👋 MAX Channel Poster</b>\n\n{help_text()}")
