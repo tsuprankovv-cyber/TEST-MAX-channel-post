@@ -161,7 +161,7 @@ async def handle_inline_add_name(user_id, text, send, state):
     
     state.set_step(user_id, None)
     
-    # 🔥 Сначала дубликаты — отдельным сообщением
+    # Сначала дубликаты — отдельным сообщением
     if duplicates:
         dup_lines = [f"<b>⚠️ Уже есть ({len(duplicates)}):</b>"]
         for name, _, existing in duplicates:
@@ -172,7 +172,7 @@ async def handle_inline_add_name(user_id, text, send, state):
         dup_lines.append("🔙 /templates | 🏠 /start")
         await send('\n'.join(dup_lines))
     
-    # 🔥 Потом добавленное + предпросмотр
+    # Потом добавленное + предпросмотр
     if added or errors:
         response = []
         
@@ -186,7 +186,6 @@ async def handle_inline_add_name(user_id, text, send, state):
             for e in errors:
                 response.append(f"• {e}")
         
-        # Предпросмотр всех ссылок
         templates = load_inline_templates(user_id)
         if templates:
             response.append(f"\n<b>👁 Предпросмотр:</b>")
@@ -199,7 +198,6 @@ async def handle_inline_add_name(user_id, text, send, state):
         response.append("🔙 /templates | 🏠 /start")
         await send('\n'.join(response))
     
-    # Если ничего не добавили и нет ошибок — только дубликаты уже отправлены
     if not added and not errors and not duplicates:
         await send(
             "❌ Ничего не добавлено.\n\n"
@@ -239,7 +237,7 @@ async def handle_btn_add_name(user_id, text, send, state, max_client=None):
     
     state.set_step(user_id, None)
     
-    # 🔥 Сначала дубликаты — отдельным сообщением
+    # Сначала дубликаты — отдельным сообщением
     if duplicates:
         dup_lines = [f"<b>⚠️ Уже есть ({len(duplicates)}):</b>"]
         for name, _, existing in duplicates:
@@ -250,7 +248,7 @@ async def handle_btn_add_name(user_id, text, send, state, max_client=None):
         dup_lines.append("🔙 /templates | 🏠 /start")
         await send('\n'.join(dup_lines))
     
-    # 🔥 Потом добавленное + предпросмотр
+    # Потом добавленное + предпросмотр кнопками В ОДНОМ СООБЩЕНИИ
     if added or errors:
         response = []
         
@@ -264,22 +262,25 @@ async def handle_btn_add_name(user_id, text, send, state, max_client=None):
             for e in errors:
                 response.append(f"• {e}")
         
-        # Предпросмотр кнопок
         templates = load_button_templates(user_id)
-        if templates:
-            chat_id = state.get_session(user_id).get('chat_id', user_id)
-            if max_client:
-                await max_client.send_message(
-                    chat_id=chat_id,
-                    text=f"<b>👁 Предпросмотр кнопок:</b>",
-                    buttons=[[t] for t in templates],
-                    use_html_format=True
-                )
         
-        response.append("\n─────────────────")
-        response.append("➕ /btn_add | 📋 /btn_list")
-        response.append("🔙 /templates | 🏠 /start")
-        await send('\n'.join(response))
+        if templates:
+            response.append(f"\n<b>👁 Предпросмотр кнопок:</b>")
+            
+            # ОДНО сообщение: текст + кнопки приклеены
+            await send(
+                '\n'.join(response),
+                buttons=[[t] for t in templates]
+            )
+        else:
+            await send('\n'.join(response))
+        
+        # Меню отдельно
+        await send(
+            "─────────────────\n"
+            "➕ /btn_add | 📋 /btn_list\n"
+            "🔙 /templates | 🏠 /start"
+        )
     
     if not added and not errors and not duplicates:
         await send(
