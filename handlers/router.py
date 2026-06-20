@@ -36,7 +36,8 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             return await max_client.send_message(
                 chat_id=chat_id or user_id,
                 text=text,
-                buttons=buttons
+                buttons=buttons,
+                use_html_format=True  # 🔥 Всегда HTML для поддержки <b>, <code>, etc.
             )
         
         body = msg.get('body', {}) if isinstance(msg.get('body'), dict) else {}
@@ -122,7 +123,7 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif cmd == '/cancel':
             state.clear_draft(user_id)
             state.clear_session(user_id)
-            await send(f"🗑️ Сброшено.\n\n{help_text()}")
+            await send(f"<b>🗑️ Сброшено</b>\n\n{help_text()}")
         
         elif cmd == '/stats':
             await handle_stats(send, stats)
@@ -161,6 +162,38 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
         elif cmd.startswith('/btn_del '):
             await handle_btn_del(user_id, cmd.replace('/btn_del ', ''), send)
         
+        # === ТЕСТ ЦВЕТОВ ===
+        elif cmd == '/test_colors':
+            logger.info("[TEST-COLORS] 🎨 Testing button colors...")
+            await send("🎨 Отправляю 5 тестовых кнопок в канал...")
+            
+            colors = [
+                ("#00747A", "Бирюзовый"),
+                ("#F4991A", "Оранжевый"),
+                ("#FDC30B", "Жёлтый"),
+                ("primary", "Синий (primary)"),
+                ("success", "Зелёный (success)"),
+            ]
+            
+            for color, name in colors:
+                btn_data = {"type": "link", "text": f"Кнопка {name}", "url": "https://ya.ru"}
+                if color.startswith('#'):
+                    btn_data['color'] = color
+                else:
+                    btn_data['style'] = color
+                
+                result = await max_client.send_message(
+                    chat_id=channel_id,
+                    text=f"🎨 Тест: {name} ({color})",
+                    buttons=[[btn_data]]
+                )
+                
+                resp_btn = result.get('message', {}).get('body', {}).get('attachments', [])
+                logger.info(f"[TEST-COLORS] {name} ({color}): {json.dumps(resp_btn, ensure_ascii=False)[:200]}")
+                await asyncio.sleep(0.5)
+            
+            await send("✅ Готово! Проверь канал и скажи какие цвета сработали.")
+        
         # === ОБРАБОТКА ПО ШАГАМ ===
         elif step == 'waiting_password':
             await handle_password(user_id, text.strip(), send, auth, state)
@@ -169,7 +202,13 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
             if raw_attachments:
                 await handle_post_photo(user_id, raw_attachments, send, state, media_mgr)
             else:
-                await send("📸 Отправьте фото или /skip")
+                await send(
+                    "<b>📸 Отправьте фото или видео</b>\n\n"
+                    "Просто прикрепите файл к сообщению.\n\n"
+                    "─────────────────\n"
+                    "⏭ /skip — пропустить\n"
+                    "❌ /cancel — отмена"
+                )
         
         elif step == 'post_waiting_text':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
@@ -187,9 +226,18 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
                 await handle_inline_confirm(user_id, send, state, max_client)
             elif cmd == '/skip':
                 state.set_step(user_id, 'post_waiting_buttons')
-                await send("🔘 Шаг 4/4: Добавьте URL-кнопки\n⏭ /skip | 📋 /btn_use | ❌ /cancel")
+                await send(
+                    "<b>🔘 Шаг 4/4: Добавьте URL-кнопки</b>\n\n"
+                    "📋 /btn_use — шаблоны\n\n"
+                    "─────────────────\n"
+                    "⏭ /skip — пропустить\n"
+                    "❌ /cancel — отмена"
+                )
             else:
-                await send("✅ /inline_yes — подтвердить\n❌ /skip — пропустить")
+                await send(
+                    "✅ /inline_yes — подтвердить\n"
+                    "❌ /skip — пропустить"
+                )
         
         elif step == 'post_waiting_buttons':
             if cmd == '/btn_use':
@@ -209,13 +257,16 @@ def create_router(auth, state, max_client, media_mgr, scheduler, stats, channel_
                 state.set_step(user_id, 'post_ready')
                 await send_preview(user_id, send, state, max_client)
             else:
-                await send("✅ /btn_yes — подтвердить\n❌ /skip — пропустить")
+                await send(
+                    "✅ /btn_yes — подтвердить\n"
+                    "❌ /skip — пропустить"
+                )
         
         elif step == 'post_ready':
             await handle_post_text(user_id, text, markup, raw_attachments, send, state, media_mgr)
             await send_preview(user_id, send, state, max_client)
         
-        # 🔥 Новые шаги для добавления шаблонов
+        # 🔥 Шаги добавления шаблонов
         elif step == 'inline_add_name':
             await handle_inline_add_name(user_id, text, send, state)
         
