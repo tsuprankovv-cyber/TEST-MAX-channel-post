@@ -23,7 +23,7 @@ async def send_preview(user_id, send, state, max_client=None):
     
     chat_id = state.get_session(user_id).get('chat_id', user_id)
     
-    # Если есть max_client — отправляем полноценный предпросмотр с медиа
+    # 🔥 Всегда отправляем с HTML-форматом
     if max_client:
         logger.info(f"[PREVIEW] Sending full preview with media")
         await max_client.send_message(
@@ -31,11 +31,17 @@ async def send_preview(user_id, send, state, max_client=None):
             text=text or "Предпросмотр",
             buttons=buttons,
             attachments=[{'type': a['type'], 'payload': a['payload']} for a in attachments if a.get('payload')],
-            use_html_format=bool(draft.get('markup'))
+            use_html_format=True  # 🔥 Всегда True
         )
     else:
         logger.info(f"[PREVIEW] No max_client, sending text only")
         if text:
             await send(text)
     
-    await send("📝 /edit | 🚀 /publish | ❌ /cancel")
+    # Команды под чертой
+    await send(
+        "─────────────────\n"
+        "🚀 /publish — опубликовать\n"
+        "✏️ /edit — редактировать\n"
+        "❌ /cancel — отмена"
+    )
